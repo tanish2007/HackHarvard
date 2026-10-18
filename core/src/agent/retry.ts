@@ -7,6 +7,8 @@
  * one more try. A 429 is never retried on the same model, because the retry
  * would use up more of the limit and the limit lasts longer than Core waits.
  * It moves on to the next model instead, since each model has its own limit.
+ * A model that is merely slow is abandoned after a per-attempt time limit, so
+ * one slow model cannot use up the whole wait before a fast one gets a turn.
  * Everything stops as soon as Core stops waiting.
  */
 
@@ -55,12 +57,28 @@ export function canFailOver(err: unknown): boolean {
  *         each one after. Defaults to 300.
  *     signal (AbortSignal | undefined): Stops retrying once aborted.
  *     sleep ((ms: number) => Promise<void> | undefined): Injectable for tests.
+ *     attemptTimeoutMs (number | undefined): withFailover only. How long one
+ *         model gets before it is abandoned for the next. Unset means no limit.
  */
 export interface RetryOptions {
   retries?: number;
   delayMs?: number;
   signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
+  attemptTimeoutMs?: number;
+}
+
+/**
+ * A model took longer than its per-attempt time limit.
+ *
+ * Attributes:
+ *     model (string): The model that was too slow.
+ */
+export class AttemptTimeoutError extends Error {
+  constructor(readonly model: string, ms: number) {
+    super(`${model} did not answer within ${ms} ms`);
+    this.name = "AttemptTimeoutError";
+  }
 }
 
 /**
@@ -98,13 +116,17 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
  * Try a call on each model in turn until one answers.
  *
  * Each model is tried with withRetry first, so a brief 503 is retried on the
- * same model. A 429 or an exhausted retry moves on to the next model. An error
- * that every model would give, such as a bad key, is thrown at once.
+ * same model. A 429, an exhausted retry, or a model that is too slow moves on
+ * to the next model. An error that every model would give, such as a bad key,
+ * is thrown at once.
  *
  * Args:
  *     models (string[]): Model ids in the order to try them.
- *     call ((model: string) => Promise<T>): The call to make on one model.
- *     options (RetryOptions): Retries per model, the pause, and when to stop.
+ *     call ((model: string, signal?: AbortSignal) => Promise<T>): The call to
+ *         make on one model. The signal aborts when this attempt runs out of
+ *         time or Core stops waiting, so the request can be cancelled.
+ *     options (RetryOptions): Retries per model, the pause, the per-attempt
+ *         time limit, and when to stop.
  *
  * Returns:
  *     Promise<T>: The first successful result.
@@ -115,16 +137,33 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
  */
 export async function withFailover<T>(
   models: string[],
-  call: (model: string) => Promise<T>,
+  call: (model: string, signal?: AbortSignal) => Promise<T>,
   options: RetryOptions = {},
 ): Promise<T> {
+  const limit = options.attemptTimeoutMs;
+
+  /** One attempt on one model, cancelled if it runs past the limit. */
+  const attempt = async (model: string): Promise<T> => {
+    if (!limit) return call(model, options.signal);
+    const timeout = AbortSignal.timeout(limit);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+    try {
+      return await call(model, signal);
+    } catch (err) {
+      // Only the per-attempt limit counts. If Core stopped waiting, say so as is.
+      if (timeout.aborted && !options.signal?.aborted) throw new AttemptTimeoutError(model, limit);
+      throw err;
+    }
+  };
+
   let lastError: unknown = new Error("no models to try");
   for (const model of models) {
     try {
-      return await withRetry(() => call(model), options);
+      return await withRetry(() => attempt(model), options);
     } catch (err) {
       lastError = err;
-      if (options.signal?.aborted || !canFailOver(err)) throw err;
+      if (options.signal?.aborted) throw err;
+      if (!(err instanceof AttemptTimeoutError) && !canFailOver(err)) throw err;
     }
   }
   throw lastError;
