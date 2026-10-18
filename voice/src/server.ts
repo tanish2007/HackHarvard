@@ -2,13 +2,15 @@
  * Entry point for the voice lane server.
  *
  * Run from voice/ with `npm start`. Reads .env, builds the ElevenLabs call
- * placer, and serves POST /actions for Core to push calls to. Set
- * VOICE_ACTIONS_URL in Core's .env to http://localhost:<VOICE_PORT>/actions.
+ * placer, and serves two things: POST /actions for Core to push calls to (set
+ * VOICE_ACTIONS_URL in Core's .env to http://localhost:<VOICE_PORT>/actions),
+ * and the custom LLM endpoint ElevenLabs calls for what callers say.
  */
 import express from "express";
 import { actionsErrorHandler } from "./errors.js";
 import { createActionsRouter } from "./actionsRouter.js";
 import { ElevenLabsPlacer } from "./elevenlabs.js";
+import { createLlmRouter } from "./llmRouter.js";
 
 /**
  * Read a required environment variable.
@@ -38,6 +40,13 @@ const placer = new ElevenLabsPlacer({
 
 const app = express();
 app.use(createActionsRouter({ placer }));
+app.use(
+  createLlmRouter({
+    secret: need("VOICE_LLM_SECRET"),
+    coreUrl: process.env.CORE_URL ?? "http://localhost:3000",
+    placer,
+  }),
+);
 app.use(actionsErrorHandler);
 
 const port = Number(process.env.VOICE_PORT ?? 3001);

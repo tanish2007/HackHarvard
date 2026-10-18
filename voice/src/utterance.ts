@@ -20,7 +20,8 @@ export interface UtteranceDeps {
   /**
    * Map a phone number to a Contract E person id.
    *
-   * Returns null when the number is unknown.
+   * Returns null when the number is unknown. Core then resolves the person
+   * from `from` itself, so an unknown caller is still forwarded.
    */
   resolvePerson: (from: string) => string | null;
   /** Clock, injectable for tests. Defaults to the current time. */
@@ -37,6 +38,12 @@ export interface Utterance {
   channel: Extract<Channel, "voice" | "radio">;
   /** Caller phone number in E.164 form. */
   from: string;
+  /**
+   * The person this call is about, when Relay placed the call itself. It
+   * comes from the place_call that started the call, and it wins over a
+   * number lookup, so Core can stop that person's check-in chain.
+   */
+  personId?: string | null;
   /** Transcribed text. */
   text: string;
   /** The open call to answer on. */
@@ -48,9 +55,9 @@ export interface Utterance {
 /**
  * Forward an utterance to Core and carry out whatever it asks for.
  *
- * Empty or whitespace-only text is ignored. Callers whose number cannot be
- * resolved to a person are logged and ignored, because Contract A requires a
- * resolved person_id.
+ * Empty or whitespace-only text is ignored. The person id is, in order: the
+ * one carried from the place_call, the one found by number, or null. With
+ * null, Core resolves the person from `from`.
  *
  * Args:
  *   u: The utterance and the call it came from.
@@ -67,16 +74,12 @@ export async function handleUtterance(
   const text = u.text.trim();
   if (!text) return null;
 
-  const personId = deps.resolvePerson(u.from);
-  if (!personId) {
-    log(`utterance from unknown number ${u.from} ignored`);
-    return null;
-  }
+  const personId = u.personId ?? deps.resolvePerson(u.from);
 
   const event: RelayEvent = {
     event_id: `evt_${randomUUID()}`,
     channel: u.channel,
-    person_id: personId,
+    person_id: personId ?? null,
     from: u.from,
     text,
     location: u.location ?? null,

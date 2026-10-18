@@ -25,6 +25,11 @@ describe("ElevenLabsPlacer", () => {
       to_number: "+15550001111",
     });
     expect(body.conversation_initiation_client_data.conversation_config_override.agent.first_message).toBe("Are you okay?");
+    expect(body.conversation_initiation_client_data.dynamic_variables).toEqual({
+      person_id: "p_amit",
+      caller_number: "+15550001111",
+      reason: "missed_checkin",
+    });
   });
 
   it("dials the number Core supplied instead of the lookup", async () => {
