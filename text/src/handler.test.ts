@@ -35,10 +35,10 @@ test("a first text signs the sender up", () => {
   assert.equal(registry.status(PHONE), "opted_in");
 });
 
-test("free text from a signed-up sender is acknowledged", () => {
+test("free text from a signed-up sender is passed on to Core", () => {
   const registry = new Registry();
   handleText(registry, PHONE, "hello");
-  assert.equal(handleText(registry, PHONE, "where is the shelter"), ACKNOWLEDGED);
+  assert.equal(handleText(registry, PHONE, "where is the shelter"), null);
 });
 
 test("STOP removes the sender and confirms", () => {
@@ -63,6 +63,12 @@ test("JOIN signs an opted-out sender back up", () => {
   handleText(registry, PHONE, "STOP");
   assert.equal(handleText(registry, PHONE, "JOIN"), WELCOME);
   assert.equal(registry.status(PHONE), "opted_in");
+});
+
+test("JOIN from someone already signed up is just acknowledged", () => {
+  const registry = new Registry();
+  handleText(registry, PHONE, "hello");
+  assert.equal(handleText(registry, PHONE, "JOIN"), ACKNOWLEDGED);
 });
 
 test("STOP from someone who never texted still records them as out", () => {
