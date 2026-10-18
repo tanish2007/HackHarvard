@@ -42,6 +42,9 @@ const stateRouteLayers = new Map();
 const linkLayers = new Map();
 let stateRoutes = null;
 let links = null;
+// Projected fire perimeters from Core's spread model (hazard.spread.forecast).
+let spreadLayer = null;
+const spreadLayers = new Map();
 let routeGlow = null;
 let routeLine = null;
 let routeOrigin = null;
@@ -304,6 +307,7 @@ function render(state) {
   document.querySelector(".count.sos").classList.toggle("is-hot", Number(counts.sos) > 0);
 
   const visibleHazards = drawnHazards(state);
+  syncSpread(visibleHazards);
   syncHazards(visibleHazards);
   syncShelters(state.shelters);
   const visiblePeople = statusFilter
@@ -417,6 +421,52 @@ function syncAssignments(state) {
   state.units.forEach((unit) => add(unit.unit_id, unitPoint(unit), unit.assigned_to));
   state.volunteers.forEach((volunteer) => add(volunteer.volunteer_id, volunteer, volunteer.assigned_to));
   dropMissing(linkLayers, links, seen);
+}
+
+const SPREAD_FILL = [0.14, 0.09, 0.05, 0.03];
+
+function compassWord(deg) {
+  const words = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+  return words[Math.round((((Number(deg) % 360) + 360) % 360) / 45) % 8];
+}
+
+// Draws each fire's projected perimeters (Core's Rothermel spread model) as
+// dashed outlines that fade with time: the nearest forecast is the boldest.
+function syncSpread(rows) {
+  const seen = new Set();
+  rows.forEach((hazard) => {
+    const forecast = hazard.spread && Array.isArray(hazard.spread.forecast) ? hazard.spread.forecast : [];
+    forecast.forEach((step, index) => {
+      if (!Array.isArray(step.polygon) || step.polygon.length < 3) return;
+      const key = hazard.id + ":" + step.minutes;
+      seen.add(key);
+      const latlngs = step.polygon.map((point) => [point.lat, point.lng]);
+      const tooltip = "Projected fire edge in " + step.minutes + " min (model estimate), spreading "
+        + compassWord(hazard.spread.head_direction_deg);
+      const style = {
+        color: "#f97316",
+        weight: index === 0 ? 2 : 1.5,
+        dashArray: "6 6",
+        fillColor: "#f97316",
+        fillOpacity: SPREAD_FILL[Math.min(index, SPREAD_FILL.length - 1)],
+      };
+      const existing = spreadLayers.get(key);
+      if (existing) {
+        existing.setLatLngs(latlngs);
+        existing.setStyle(style);
+        existing.setTooltipContent(tooltip);
+        return;
+      }
+      const layer = L.polygon(latlngs, style).bindTooltip(tooltip, { sticky: true });
+      layer.on("click", () => {
+        holdMapClick();
+        openInspector(hazardModel(hazard), true);
+      });
+      layer.addTo(spreadLayer);
+      spreadLayers.set(key, layer);
+    });
+  });
+  dropMissing(spreadLayers, spreadLayer, seen);
 }
 
 function syncHazards(rows) {
@@ -759,8 +809,20 @@ function hazardModel(hazard) {
       ["Radius", hazard.radius_km + " km"],
       ["Source", hazard.source],
       ["Updated", hazard.updated_at ? ago(hazard.updated_at) : "Standing"],
-    ],
+    ].concat(spreadRows(hazard.spread)),
   };
+}
+
+function spreadRows(spread) {
+  if (!spread) return [];
+  const kmh = Math.round(spread.head_m_per_min * 0.06 * 10) / 10;
+  return [
+    ["Spreading", compassWord(spread.head_direction_deg) + " at " + kmh + " km/h"],
+    ["Wind", spread.wind_mph + " mph from " + compassWord(spread.wind_from_deg)],
+    ["Flame length", "About " + spread.flame_length_m + " m"],
+    ["Fuel", spread.fuel_model + ", " + spread.fuel_name],
+    ["Forecast", spread.forecast.map((step) => step.minutes + " min").join(", ") + " (Rothermel model estimate)"],
+  ];
 }
 
 function reportModel(report) {
@@ -1379,6 +1441,8 @@ function initMap() {
   if (start) map.setView([start.lat, start.lng], 14);
   else map.setView([0, 0], 2);
   setBasemap("dark");
+  // Under the fire circles, so the current fire stays on top of its forecast.
+  spreadLayer = L.layerGroup().addTo(map);
   hazards = L.layerGroup().addTo(map);
   shelters = L.layerGroup().addTo(map);
   people = L.layerGroup().addTo(map);
