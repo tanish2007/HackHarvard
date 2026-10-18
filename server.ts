@@ -9,6 +9,7 @@ import express from "express";
 import { createCoreRouter } from "./core/src/app.js";
 import { jsonErrorHandler } from "./core/src/lib/asyncHandler.js";
 import { loadScenario, placeholderIds } from "./core/src/scenario/load.js";
+import { IncidentStore } from "./core/src/state/store.js";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -22,7 +23,7 @@ if (placeholders.length > 0) {
 }
 
 const app = express();
-app.use(createCoreRouter({ scenario }));
+app.use(createCoreRouter({ scenario, store: new IncidentStore(scenario) }));
 app.use(jsonErrorHandler);
 
 const port = Number(process.env.PORT ?? 3000);
