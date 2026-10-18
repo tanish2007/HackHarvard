@@ -3,7 +3,7 @@
  *
  * Used to switch a person's reply language when they text in another
  * language, so a new Spanish texter gets a Spanish welcome. It only answers
- * when a message clearly is Gujarati, Chinese, or Spanish. Short or mixed
+ * when a message clearly is Gujarati, Hindi, Chinese, or Spanish. Short or mixed
  * messages ("ok", "SOS", "5", "I'm at Peña St") return null and the person
  * keeps their language. It never detects English, so nobody is switched back
  * to English by a short reply.
@@ -11,6 +11,10 @@
  * Rules:
  *     - Gujarati: at least two Gujarati script characters (the U+0A80 to
  *       U+0AFF block), and no fewer than the Latin letters.
+ *     - Hindi: at least two Devanagari characters (the U+0900 to U+097F
+ *       block), and no fewer than the Latin letters. Marathi and Nepali share
+ *       the script and would also match, which is fine: the Hindi replies are
+ *       the closest Relay has.
  *     - Chinese: at least two Han characters, no Japanese kana, and no fewer
  *       than the Latin letters.
  *     - Spanish: Spanish words (plus ¿ ¡ ñ and "por favor") must outnumber
@@ -57,7 +61,7 @@ const LATIN_LETTER = /[a-zà-öø-ɏ]/g;
 
 /**
  * Lowercase Latin-script words in the message, with curly apostrophes
- * straightened. Han and Gujarati characters are left out, so "SOS救命" gives
+ * straightened. Han, Gujarati and Devanagari characters are left out, so "SOS救命" gives
  * just "sos".
  *
  * Args:
@@ -91,7 +95,7 @@ function count(text: string, pattern: RegExp): number {
  *     text (string): The raw message text.
  *
  * Returns:
- *     Lang | null: "gu", "zh", or "es" when the message clearly is in that
+ *     Lang | null: "gu", "hi", "zh", or "es" when the message clearly is in that
  *         language, otherwise null (keep whatever language the person has).
  */
 export function detectLanguage(text: string): Lang | null {
@@ -99,10 +103,12 @@ export function detectLanguage(text: string): Lang | null {
   const latin = count(tokens.join(""), LATIN_LETTER);
 
   const gujarati = count(text, /\p{Script=Gujarati}/gu);
+  const devanagari = count(text, /\p{Script=Devanagari}/gu);
   const han = count(text, /\p{Script=Han}/gu);
   const kana = count(text, /[\p{Script=Hiragana}\p{Script=Katakana}]/gu);
 
   if (gujarati >= 2 && gujarati >= han && gujarati >= latin) return "gu";
+  if (devanagari >= 2 && devanagari >= han && devanagari >= latin) return "hi";
   if (han >= 2 && kana === 0 && han >= latin) return "zh";
 
   const english = tokens.filter((w) => ENGLISH_WORDS.has(w)).length;
