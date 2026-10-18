@@ -111,14 +111,15 @@ export class IncidentStore {
    *     entry (Omit<TimelineEntry, "at">): Channel, who, and text.
    *
    * Returns:
-   *     TimelineEntry: The stored entry, stamped with the current time.
+   *     TimelineEntry: A copy of the stored entry, stamped with the current
+   *         time. Changing it does not change the store.
    */
   addTimeline(entry: Omit<TimelineEntry, "at">): TimelineEntry {
     const stored = { at: this.now().toISOString(), ...entry };
     this.timeline.push(stored);
     if (this.timeline.length > MAX_TIMELINE) this.timeline.shift();
     this.touch();
-    return stored;
+    return { ...stored };
   }
 
   /**
