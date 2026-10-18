@@ -18,6 +18,13 @@ interface CustomLlm {
   [field: string]: unknown;
 }
 
+/** The parts of an agent's prompt settings that decide which LLM it uses. */
+interface LlmSettings {
+  /** Which kind of LLM the agent uses. Must be "custom-llm" for the URL to apply. */
+  llm?: string;
+  customLlm?: CustomLlm;
+}
+
 /** Options for {@link setAgentLlmUrl}. */
 export interface SetAgentLlmUrlOptions {
   /** ElevenLabs API key. */
@@ -71,7 +78,7 @@ export function llmBaseUrl(tunnelUrl: string, secret: string): string {
  * Args:
  *   tunnelUrl: The tunnel address.
  *   fetchImpl: Fetch implementation, injectable for tests.
- *   attempts: How many tries before giving up. Defaults to 15.
+ *   attempts: How many tries before giving up. Defaults to 30.
  *   delayMs: Pause between tries. Defaults to 2000.
  *
  * Returns:
@@ -80,7 +87,7 @@ export function llmBaseUrl(tunnelUrl: string, secret: string): string {
 export async function waitForTunnel(
   tunnelUrl: string,
   fetchImpl: typeof fetch = fetch,
-  attempts = 15,
+  attempts = 30,
   delayMs = 2000,
 ): Promise<boolean> {
   for (let i = 0; i < attempts; i++) {
@@ -98,8 +105,10 @@ export async function waitForTunnel(
 /**
  * Point one ElevenLabs agent at a new custom LLM URL, and confirm it stuck.
  *
- * Only the `custom_llm` setting is sent, with its existing fields kept and
- * the URL replaced, so the prompt, voice, tools and backups are untouched.
+ * Only `llm` and `custom_llm` are sent, with the existing fields kept and the
+ * URL replaced, so the prompt, voice, tools and backups are untouched.
+ * ElevenLabs rejects `custom_llm` unless the same request also says `llm` is
+ * the custom type, so both are sent together.
  *
  * Args:
  *   options: The API key, the agent, the new URL and test hooks.
@@ -114,30 +123,35 @@ export async function setAgentLlmUrl(options: SetAgentLlmUrlOptions): Promise<vo
   const agentUrl = `${options.baseUrl ?? API}/v1/convai/agents/${options.agentId}`;
   const headers = { "xi-api-key": options.apiKey, "content-type": "application/json" };
 
-  /** Read the agent's current custom LLM setting. */
-  const read = async (): Promise<CustomLlm | undefined> => {
+  /** Read the agent's current LLM type and custom LLM setting. */
+  const read = async (): Promise<LlmSettings> => {
     const res = await doFetch(agentUrl, { headers, signal: AbortSignal.timeout(20000) });
     if (!res.ok) throw new Error(`could not read agent ${options.agentId}: ${res.status}`);
     const body = (await res.json()) as {
-      conversation_config?: { agent?: { prompt?: { custom_llm?: CustomLlm } } };
+      conversation_config?: { agent?: { prompt?: { llm?: string; custom_llm?: CustomLlm | null } } };
     };
-    return body.conversation_config?.agent?.prompt?.custom_llm ?? undefined;
+    const prompt = body.conversation_config?.agent?.prompt;
+    return { llm: prompt?.llm, customLlm: prompt?.custom_llm ?? undefined };
   };
 
   const current = await read();
-  if (!current) throw new Error(`agent ${options.agentId} does not use a custom LLM`);
+  if (!current.customLlm || current.llm !== "custom-llm") {
+    throw new Error(`agent ${options.agentId} does not use a custom LLM`);
+  }
 
   const patch = await doFetch(agentUrl, {
     method: "PATCH",
     headers,
     body: JSON.stringify({
-      conversation_config: { agent: { prompt: { custom_llm: { ...current, url: options.url } } } },
+      conversation_config: {
+        agent: { prompt: { llm: current.llm, custom_llm: { ...current.customLlm, url: options.url } } },
+      },
     }),
     signal: AbortSignal.timeout(30000),
   });
   if (!patch.ok) throw new Error(`could not update agent ${options.agentId}: ${patch.status}`);
 
-  if ((await read())?.url !== options.url) {
+  if ((await read()).customLlm?.url !== options.url) {
     throw new Error(`agent ${options.agentId} did not keep the new URL`);
   }
 }

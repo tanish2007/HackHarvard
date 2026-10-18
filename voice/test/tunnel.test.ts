@@ -60,8 +60,13 @@ describe("waitForTunnel", () => {
   });
 });
 
-/** A fake ElevenLabs that remembers the agent's custom LLM and applies PATCHes. */
-const fakeApi = (initial: Record<string, unknown> | null, patchStatus = 200, keepPatch = true) => {
+/**
+ * A fake ElevenLabs that remembers the agent's LLM settings and applies PATCHes.
+ *
+ * It enforces the rule the real API has: a `custom_llm` is rejected with a 400
+ * unless the same request also sets `llm` to "custom-llm".
+ */
+const fakeApi = (initial: Record<string, unknown> | null, patchStatus = 200, keepPatch = true, llm = "custom-llm") => {
   let current = initial;
   const calls: { method: string; body?: unknown }[] = [];
   const f = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -69,11 +74,15 @@ const fakeApi = (initial: Record<string, unknown> | null, patchStatus = 200, kee
     const body = init?.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, body });
     if (method === "PATCH") {
-      if (patchStatus === 200 && keepPatch) current = body.conversation_config.agent.prompt.custom_llm;
+      const prompt = body.conversation_config.agent.prompt;
+      if (prompt.custom_llm && prompt.llm !== "custom-llm") {
+        return new Response(JSON.stringify({ detail: "custom_llm can only be set if llm is set to CUSTOM_LLM" }), { status: 400 });
+      }
+      if (patchStatus === 200 && keepPatch) current = prompt.custom_llm;
       return new Response("{}", { status: patchStatus });
     }
     return new Response(
-      JSON.stringify({ conversation_config: { agent: { prompt: { custom_llm: current } } } }),
+      JSON.stringify({ conversation_config: { agent: { prompt: { llm, custom_llm: current } } } }),
       { status: 200 },
     );
   });
@@ -94,7 +103,8 @@ describe("setAgentLlmUrl", () => {
     const patch = calls.find((c) => c.method === "PATCH")?.body as {
       conversation_config: { agent: { prompt: Record<string, unknown> } };
     };
-    expect(Object.keys(patch.conversation_config.agent.prompt)).toEqual(["custom_llm"]);
+    expect(Object.keys(patch.conversation_config.agent.prompt).sort()).toEqual(["custom_llm", "llm"]);
+    expect(patch.conversation_config.agent.prompt.llm).toBe("custom-llm");
     expect(patch.conversation_config.agent.prompt.custom_llm).toEqual({
       url: "https://new.trycloudflare.com/llm/s3cret/v1",
       model_id: "relay",
@@ -104,6 +114,20 @@ describe("setAgentLlmUrl", () => {
 
   it("refuses an agent that does not use a custom LLM, and changes nothing", async () => {
     const { f, calls } = fakeApi(null);
+    await expect(setAgentLlmUrl(options(f))).rejects.toThrow("does not use a custom LLM");
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("sends llm together with custom_llm, as the real API requires", async () => {
+    const { f, calls } = fakeApi({ url: "old", model_id: "relay" });
+    await setAgentLlmUrl(options(f));
+    const prompt = (calls.find((c) => c.method === "PATCH")?.body as { conversation_config: { agent: { prompt: Record<string, unknown> } } })
+      .conversation_config.agent.prompt;
+    expect(prompt.llm).toBe("custom-llm");
+  });
+
+  it("refuses an agent whose LLM is not the custom one, even if it has old custom settings", async () => {
+    const { f, calls } = fakeApi({ url: "old" }, 200, true, "gemini-2.5-flash");
     await expect(setAgentLlmUrl(options(f))).rejects.toThrow("does not use a custom LLM");
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   });
