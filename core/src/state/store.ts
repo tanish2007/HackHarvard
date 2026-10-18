@@ -196,6 +196,16 @@ export class IncidentStore {
   }
 
   /**
+   * Everyone currently tracked, for the agent's people lookups.
+   *
+   * Returns:
+   *     TrackedPerson[]: Copies, in scenario order.
+   */
+  listPeople(): TrackedPerson[] {
+    return [...this.people.values()].map((p) => ({ ...p }));
+  }
+
+  /**
    * Look up a person by phone number or iMessage email.
    *
    * Args:
