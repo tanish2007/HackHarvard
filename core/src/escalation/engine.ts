@@ -297,6 +297,12 @@ export function createEscalationEngine(options: EscalationOptions): EscalationEn
       const by = confirmedBy?.trim() || "a responder";
       store.addTimeline({ channel: "system", who: "Relay", text: `911 call confirmed by ${by} for ${person.name}` });
       const results = await pushCall(action);
+      // Voice did not take the call, so give the claim back and let the
+      // responder press confirm again.
+      if (results.length === 0 || results.some((r) => !r.ok)) {
+        if (confirmed.get(personId) === since) confirmed.delete(personId);
+        store.addTimeline({ channel: "system", who: "Relay", text: `911 call for ${person.name} did not go through, confirm again to retry` });
+      }
       return { ok: true, action, results };
     },
 
