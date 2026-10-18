@@ -22,10 +22,16 @@ export interface CoreDeps {
 }
 
 /**
- * Build Core's router.
+ * JSON body parser for Core's own POST routes.
  *
- * JSON parsing is scoped to this router, not the whole server, because
- * Photon's Express adapter needs the raw request body on Text's routes.
+ * Attach it per route, never with router.use(). Core's router is mounted at
+ * "/", so router.use() would parse every request on the server, and Photon's
+ * Express adapter on Text's routes needs the raw body untouched.
+ */
+export const jsonBody = express.json({ limit: "1mb" });
+
+/**
+ * Build Core's router.
  *
  * Args:
  *     deps (CoreDeps): The scenario and other shared pieces.
@@ -35,7 +41,6 @@ export interface CoreDeps {
  */
 export function createCoreRouter(deps: CoreDeps): Router {
   const router = Router();
-  router.use(express.json({ limit: "1mb" }));
 
   router.get("/health", (_req, res) => {
     res.json({ status: "ok", incident: deps.scenario.incident.name });
