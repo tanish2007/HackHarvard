@@ -8,7 +8,7 @@
  */
 
 /** Every language with committed translations. English is the fallback. */
-export const LANGUAGES = ["en", "es", "zh", "gu"] as const;
+export const LANGUAGES = ["en", "es", "zh", "gu", "hi"] as const;
 
 /** A supported language code. */
 export type Lang = (typeof LANGUAGES)[number];
@@ -22,6 +22,7 @@ export const LANGUAGE_NAMES: Record<Lang, string> = {
   es: "Spanish",
   zh: "Mandarin Chinese (Simplified)",
   gu: "Gujarati",
+  hi: "Hindi",
 };
 
 /**

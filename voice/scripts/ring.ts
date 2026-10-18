@@ -4,7 +4,8 @@
  * Usage (from voice/):
  *   npm run ring
  *
- * Reads credentials from .env and rings TEST_CALL_TO. Nothing is hardcoded.
+ * Reads credentials from .env and rings TEST_CALL_TO. Set RING_PERSON_ID to
+ * tie the call to a person in scenario.json, for example p_amit.
  */
 import { ElevenLabsPlacer } from "../src/elevenlabs.js";
 
@@ -32,7 +33,8 @@ const placer = new ElevenLabsPlacer({
   agentId: need("ELEVENLABS_AGENT_ID"),
   phoneNumberId: need("ELEVENLABS_PHONE_NUMBER_ID"),
   resolveNumber: () => to,
+  timeoutMs: 30000,
 });
 
-await placer.placeCall("p_test", "This is Relay. Are you okay?", "smoke_test", null);
+await placer.placeCall(process.env.RING_PERSON_ID ?? "p_test", "This is Relay. Are you okay?", "smoke_test", null);
 console.log(`call requested to ${to}`);
