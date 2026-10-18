@@ -47,26 +47,47 @@ export const replies = {
    * Args:
    *     name (string): Their name.
    *     medium (Medium): Text or spoken.
+   *     hasLocation (boolean): Whether Relay knows where they are. If not,
+   *         the text asks them to share it so responders can find them.
    *
    * Returns:
    *     string: The SOS acknowledgement.
    */
-  sos(name: string, medium: Medium): string {
+  sos(name: string, medium: Medium, hasLocation: boolean): string {
     if (medium === "spoken") return `${name}, I've marked you as needing help. Responders are being alerted now.`;
+    const where = hasLocation ? "" : "Please share your location so responders can find you. ";
     return (
-      `Relay got your SOS, ${name}. Responders are being alerted now. ` +
+      `Relay got your SOS, ${name}. Responders are being alerted now. ${where}` +
       "Stay where you are safest and keep your phone on. Reply SAFE once you are out of danger."
     );
   },
 
   /**
-   * Reply to an SOS from a caller Relay does not know.
+   * Reply to an SOS from a sender Relay does not know, such as a caller.
+   *
+   * Args:
+   *     medium (Medium): Text or spoken.
    *
    * Returns:
-   *     string: Spoken acknowledgement.
+   *     string: The acknowledgement.
    */
-  sosUnknown(): string {
-    return "I've logged your call for help. Responders are being alerted now.";
+  sosUnknown(medium: Medium): string {
+    if (medium === "spoken") return "I've logged your call for help. Responders are being alerted now.";
+    return "Relay got your SOS. Responders are being alerted now.";
+  },
+
+  /**
+   * Welcome back someone who sent STOP and then texted again.
+   *
+   * Args:
+   *     name (string): Their name.
+   *     incident (string): Incident name.
+   *
+   * Returns:
+   *     string: The welcome back text.
+   */
+  welcomeBack(name: string, incident: string): string {
+    return `Welcome back, ${name}. You're signed up again for Relay alerts for the ${incident}. Reply SOS anytime if you need help, or STOP to opt out.`;
   },
 
   /**

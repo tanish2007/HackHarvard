@@ -51,13 +51,26 @@ interface Sender {
   unit: TrackedUnit | undefined;
   who: string;
   isNew: boolean;
+  rejoined: boolean;
 }
+
+/**
+ * Longest Core waits for the agent before falling back. Voice gives up on
+ * /event after 4s, so this leaves time for the rest of the request.
+ */
+export const AGENT_TIMEOUT_MS = 3200;
+
+/** Events still being handled, per store, so a redelivery waits for them. */
+const inFlight = new WeakMap<IncidentStore, Map<string, Promise<CoreResponse>>>();
 
 /**
  * Handle one event and return the actions for the channels.
  *
- * A repeated event_id gets the same response again, without running twice,
- * because Photon can deliver the same message more than once.
+ * A repeated event gets the same response again without running twice,
+ * because Photon can deliver the same message more than once, most often
+ * while Core is slow. That includes a copy that arrives while the first is
+ * still being handled. Events are keyed on channel plus event_id, since Text
+ * and Voice number their events separately.
  *
  * Args:
  *     event (RelayEvent): A validated Contract A event.
@@ -67,14 +80,28 @@ interface Sender {
  *     Promise<CoreResponse>: The actions. Possibly an empty list, never null.
  */
 export async function handleEvent(event: RelayEvent, deps: HandlerDeps): Promise<CoreResponse> {
-  const seen = deps.store.seenResponse(event.event_id);
+  const key = `${event.channel}:${event.event_id}`;
+  const seen = deps.store.seenResponse(key);
   if (seen) return seen;
 
-  const sender = resolveSender(event, deps.store);
-  const response = { actions: await route(event, sender, deps) };
-  deps.store.rememberResponse(event.event_id, response);
-  logActions(deps.store, event, response.actions, sender);
-  return response;
+  let pending = inFlight.get(deps.store);
+  if (!pending) inFlight.set(deps.store, (pending = new Map()));
+  const running = pending.get(key);
+  if (running) return structuredClone(await running);
+
+  const work = (async () => {
+    const sender = resolveSender(event, deps.store);
+    const response = { actions: await route(event, sender, deps) };
+    deps.store.rememberResponse(key, response);
+    logActions(deps.store, event, response.actions, sender);
+    return response;
+  })();
+  pending.set(key, work);
+  try {
+    return structuredClone(await work);
+  } finally {
+    pending.delete(key);
+  }
 }
 
 /**
@@ -86,18 +113,23 @@ export async function handleEvent(event: RelayEvent, deps: HandlerDeps): Promise
  *
  * Returns:
  *     Sender: The person or unit, a display name, and whether they just
- *         signed up.
+ *         signed up or came back after STOP.
  */
 function resolveSender(event: RelayEvent, store: IncidentStore): Sender {
   const unit = store.findUnitByHandle(event.from);
   let person = unit ? undefined : (event.person_id ? store.getPerson(event.person_id) : undefined) ?? store.findPersonByHandle(event.from);
   let isNew = false;
+  let rejoined = false;
 
   const isText = event.channel === "imessage" || event.channel === "sms";
   const isStop = classify(event.text, event.channel, "").intent === "stop";
   if (!unit && !person && isText && !isStop) {
-    person = store.addPerson(event.from, event.location);
-    isNew = true;
+    person = store.restoreByHandle(event.from);
+    if (person) rejoined = true;
+    else {
+      person = store.addPerson(event.from, event.location);
+      isNew = true;
+    }
   }
 
   if (unit) store.markUnitHeard(unit.unit_id);
@@ -109,7 +141,8 @@ function resolveSender(event: RelayEvent, store: IncidentStore): Sender {
   const who = unit?.name ?? person?.name ?? (event.channel === "radio" ? "Radio" : "Unknown caller");
   store.addTimeline({ channel: event.channel, who, text: describeInbound(event) });
   if (isNew) store.addTimeline({ channel: "system", who: "Relay", text: `${who} signed up by text` });
-  return { person, unit, who, isNew };
+  if (rejoined) store.addTimeline({ channel: "system", who: "Relay", text: `${who} signed up again after STOP` });
+  return { person, unit, who, isNew, rejoined };
 }
 
 /**
@@ -164,10 +197,10 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       if (!person) {
         // No phone number here: the timeline is shown on the dashboard.
         store.addTimeline({ channel: "system", who: "Relay", text: `SOS from ${sender.who}, needs human review` });
-        return [{ type: "say", text: replies.sosUnknown() }];
+        return [reply(replies.sosUnknown(medium))];
       }
       const result = store.setStatus(person.person_id, "sos");
-      const actions = [reply(replies.sos(person.name, medium))];
+      const actions = [reply(replies.sos(person.name, medium, person.lat !== null))];
       if (result.changed) {
         store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} marked SOS: "${event.text}"` });
         actions.push(...familyAlert(person, store));
@@ -188,17 +221,39 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
 
     case "agent": {
       if (sender.isNew) return [reply(replies.welcome(incident, event.location !== null))];
+      if (sender.rejoined && person) return [reply(replies.welcomeBack(person.name, incident))];
       if (person && event.location && !event.text.trim()) return [reply(replies.locationThanks(person.name))];
       const channelKind = event.channel === "radio" ? "radio" : medium === "spoken" ? "voice" : "text";
       if (!deps.agent) return [reply(replies.fallback(incident, channelKind))];
       try {
-        return await deps.agent({ event, text, person, unit, who: sender.who });
+        return await withTimeout(deps.agent({ event, text, person, unit, who: sender.who }), AGENT_TIMEOUT_MS);
       } catch (err) {
         console.error(`[core] agent failed for ${event.event_id}:`, err);
         return [reply(replies.fallback(incident, channelKind))];
       }
     }
   }
+}
+
+/**
+ * Reject if a promise takes longer than the limit.
+ *
+ * Args:
+ *     promise (Promise<T>): The work to wait for.
+ *     ms (number): Time limit in milliseconds.
+ *
+ * Returns:
+ *     Promise<T>: The work's result.
+ *
+ * Raises:
+ *     Error: "agent timed out" if the limit passes first.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`agent timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 /**
