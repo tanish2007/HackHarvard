@@ -173,6 +173,15 @@ function checkReferences(file: ScenarioFile, people: ScenarioPerson[]): void {
   assertUnique("agent_id", file.agents.map((a) => a.agent_id));
   assertUnique("person or unit id", [...people.map((p) => p.person_id), ...file.units.map((u) => u.unit_id), EMERGENCY_KEY]);
 
+  // Inbound messages are matched to a sender by phone, so a shared number
+  // would send one person's texts to someone else. The emergency contact is
+  // only ever called, never matched, so it may reuse a persona's phone.
+  const phones = [...people.flatMap((p) => (p.phone ? [p.phone] : [])), ...file.units.map((u) => u.phone)];
+  assertUnique("phone", phones);
+  for (const [line, phone] of Object.entries(file.relay_lines)) {
+    if (phones.includes(phone)) throw new Error(`relay_lines.${line} uses the same phone as a person or unit`);
+  }
+
   const personIds = new Set(people.map((p) => p.person_id));
   const zoneIds = new Set(file.zones.map((z) => z.id));
   const agentIds = new Set(file.agents.map((a) => a.agent_id));
