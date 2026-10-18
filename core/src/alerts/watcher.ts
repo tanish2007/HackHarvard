@@ -22,6 +22,9 @@ import { compassDirection, distanceKm } from "../lib/geo.js";
 import { realScheduler, type Cancel, type Scheduler } from "../lib/scheduler.js";
 import type { IncidentStore, TrackedPerson } from "../state/store.js";
 
+/** Fires closer together than this, in km, count as the same fire for alerts. */
+const SAME_FIRE_KM = 1;
+
 /**
  * Settings for the hazard watcher.
  *
@@ -108,8 +111,8 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
   const log = options.log ?? ((m: string) => console.error(m));
   const { settings, incident } = store.scenario;
 
-  /** "person_id|hazard_id" pairs already alerted. */
-  const alerted = new Set<string>();
+  /** person_id to the fires they were already alerted about. */
+  const alerted = new Map<string, Hazard[]>();
   /** Bumped by reset(), so a run that started before it sends nothing. */
   let generation = 0;
   let queue: Promise<unknown> = Promise.resolve();
@@ -125,16 +128,22 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
   const empty = (): AlertSummary => ({ alerted: 0, person_ids: [], hazards: store.listHazards().length });
 
   /**
-   * Key for the alerted set.
+   * Whether a person was already alerted about this fire.
+   *
+   * Live FIRMS ids can change between polls for the same fire, so a fire
+   * within SAME_FIRE_KM of one they were alerted about counts as the same.
    *
    * Args:
-   *     personId (string): Who was alerted.
-   *     hazardId (string): Which hazard.
+   *     personId (string): Who.
+   *     hazard (Hazard): The fire.
    *
    * Returns:
-   *     string: "person_id|hazard_id".
+   *     boolean: True if they already got an alert for it.
    */
-  const key = (personId: string, hazardId: string): string => `${personId}|${hazardId}`;
+  const wasAlerted = (personId: string, hazard: Hazard): boolean =>
+    (alerted.get(personId) ?? []).some(
+      (h) => h.id === hazard.id || distanceKm(h.lat, h.lng, hazard.lat, hazard.lng) <= SAME_FIRE_KM,
+    );
 
   /**
    * How far from the incident centre to ask for hazards: far enough to cover
@@ -168,7 +177,7 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
     const { lat, lng } = person;
     return fires
       .map((hazard) => ({ hazard, edgeKm: distanceKm(lat, lng, hazard.lat, hazard.lng) - hazard.radius_km }))
-      .filter((f) => f.edgeKm <= settings.alert_radius_km && !alerted.has(key(person.person_id, f.hazard.id)))
+      .filter((f) => f.edgeKm <= settings.alert_radius_km && !wasAlerted(person.person_id, f.hazard))
       .sort((a, b) => a.edgeKm - b.edgeKm);
   };
 
@@ -261,7 +270,7 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
       if (!store.getPerson(person.person_id)) continue;
       const { action, alert } = built[i];
       // One alert covers every fire they are near right now.
-      for (const f of near) alerted.add(key(person.person_id, f.hazard.id));
+      alerted.set(person.person_id, [...(alerted.get(person.person_id) ?? []), ...near.map((f) => f.hazard)]);
       sent.push(action);
       logPushed(store, [action]);
       const where = alert.inside ? "inside the fire area" : `fire ${alert.fireKm.toFixed(1)} km ${alert.direction}`;
