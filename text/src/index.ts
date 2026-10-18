@@ -1,9 +1,17 @@
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
-import { handleText } from "./handler.js";
+import { postEvent } from "./coreClient.js";
+import { loadDirectory } from "./people.js";
 import { Registry } from "./registry.js";
+import { processText, type RelayDeps } from "./relay.js";
 
-const registry = new Registry();
+const coreUrl = process.env.CORE_URL || "http://localhost:3000";
+const deps: RelayDeps = {
+  registry: new Registry(),
+  directory: loadDirectory(),
+  postEvent: (event) => postEvent(event, { coreUrl }),
+};
+console.log(`[text] sending events to ${coreUrl}`);
 
 // Spectrum bridges a single agent loop to many messaging interfaces.
 // Each provider in `providers` adds an interface (terminal TUI, iMessage, …).
@@ -24,5 +32,12 @@ for await (const [space, message] of app.messages) {
   console.log("incoming", message.platform, phone, message.content.type);
   if (message.content.type !== "text" || !phone) continue;
 
-  await space.send(handleText(registry, phone, message.content.text));
+  try {
+    for (const reply of await processText(deps, phone, message.content.text)) {
+      await space.send(reply);
+    }
+  } catch (err) {
+    // One bad message must not stop the bot from reading the next one.
+    console.error(`[text] failed to handle a message from ${phone}:`, err);
+  }
 }
