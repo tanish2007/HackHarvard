@@ -9,6 +9,10 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import express from "express";
+import { createCoreRouter } from "../src/app.js";
+import type { RelayEvent } from "../src/contracts.js";
+import type { Agent } from "../src/event/handle.js";
 import { loadScenario } from "../src/scenario/load.js";
 import type { Scenario } from "../src/scenario/schema.js";
 import { IncidentStore } from "../src/state/store.js";
@@ -95,6 +99,61 @@ export function errorMessage(fn: () => unknown): string {
     return err instanceof Error ? err.message : String(err);
   }
   throw new Error("expected the call to throw, but it returned normally");
+}
+
+/** Fictional numbers from the committed scenario, plus one nobody owns. */
+export const PHONES = {
+  amit: "+16175550101",
+  priya: "+16175550102",
+  sam: "+16175550103",
+  unit4: "+16175550104",
+  stranger: "+16175550150",
+  stranger2: "+16175550151",
+} as const;
+
+let eventCounter = 0;
+
+/**
+ * Build a valid Contract A event, from Amit by iMessage unless overridden.
+ *
+ * Each call gets a new event_id, so events are never duplicates by accident.
+ *
+ * Args:
+ *     overrides (Partial<RelayEvent>): Fields to change.
+ *
+ * Returns:
+ *     RelayEvent: The event.
+ */
+export function makeEvent(overrides: Partial<RelayEvent> = {}): RelayEvent {
+  eventCounter++;
+  return {
+    event_id: `evt_test_${eventCounter}`,
+    channel: "imessage",
+    person_id: null,
+    from: PHONES.amit,
+    text: "hello",
+    location: null,
+    media_url: null,
+    timestamp: "2026-10-17T14:02:00Z",
+    ...overrides,
+  };
+}
+
+/**
+ * Mount Core on a fresh app with a store and clock the test controls.
+ *
+ * Args:
+ *     agent (Agent | undefined): Optional agent stub.
+ *
+ * Returns:
+ *     { app: express.Express, store: IncidentStore, advance: (sec: number) => void }:
+ *         The app, its store, and a function that moves the clock forward.
+ */
+export function coreApp(agent?: Agent) {
+  const { store, advance } = makeStore();
+  const app = express();
+  app.use(createCoreRouter({ scenario: store.scenario, store, agent }));
+  return { app, store, advance };
 }
 
 /**
