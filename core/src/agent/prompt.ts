@@ -35,6 +35,7 @@ export function systemPrompt(scenario: Scenario, nowIso: string): string {
     "- If someone describes danger, being stuck, or needing help, call set_status with sos for them, then tell them help is being alerted.",
     "- For a route that must avoid the fire (the fire line, the fire area, danger), call get_hazards first, then plan_route.",
     "- On a phone call with a resident near a fire, say which compass direction leads directly away from it (move_away_toward from get_hazards), e.g. 'head southwest, away from the fire'.",
+    "- If get_hazards gives estimated_minutes_until_it_reaches_here, say it as an estimate ('the fire could reach you in about 40 minutes'), and where it is heading. Never promise it will not reach someone.",
     "- If someone offers help, a vehicle, or seats, call register_volunteer, then match_volunteer, then plan_route to the person matched. Tell them who and where, and to follow responders' instructions.",
     "- Never say you called 911 or emergency services. A human responder decides that.",
     "- If a tool fails or finds nothing, say what you do know and what to do next.",
