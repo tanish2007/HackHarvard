@@ -1,0 +1,14 @@
+{
+  "_readme": "Copy to scenario.local.json (gitignored) and put the real numbers there. Keys are ids from scenario.json. Only phone numbers can be overridden here.",
+  "relay_lines": {
+    "messaging": "+16175550100",
+    "voice": "+16175550199"
+  },
+  "phones": {
+    "p_amit": "+16175550101",
+    "p_priya": "+16175550102",
+    "v_sam": "+16175550103",
+    "u_4": "+16175550104",
+    "emergency_contact": "+16175550111"
+  }
+}

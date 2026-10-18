@@ -1,0 +1,105 @@
+{
+  "_readme": "Contract E. Every phone number here is a fictional 555-01xx placeholder. Real numbers go in scenario.local.json, which is gitignored. Copy scenario.local.example.json to start.",
+  "incident": {
+    "name": "Oak Ridge Fire",
+    "center": { "lat": 37.86, "lng": -122.225 }
+  },
+  "relay_lines": {
+    "messaging": "+16175550100",
+    "voice": "+16175550199"
+  },
+  "zones": [
+    {
+      "id": "zone_1",
+      "name": "Zone 1",
+      "polygon": [[37.875, -122.235], [37.875, -122.215], [37.865, -122.215], [37.865, -122.235]]
+    },
+    {
+      "id": "zone_2",
+      "name": "Zone 2",
+      "polygon": [[37.865, -122.235], [37.865, -122.215], [37.855, -122.215], [37.855, -122.235]]
+    },
+    {
+      "id": "zone_3",
+      "name": "Zone 3",
+      "polygon": [[37.855, -122.235], [37.855, -122.215], [37.845, -122.215], [37.845, -122.235]]
+    }
+  ],
+  "fire_area": { "lat": 37.872, "lng": -122.205, "radius_km": 1.2 },
+  "shelters": [
+    { "id": "sh_a", "name": "Shelter A", "lat": 37.87, "lng": -122.27, "capacity_note": "Gym, about 200 cots" },
+    { "id": "sh_b", "name": "Shelter B", "lat": 37.859, "lng": -122.262, "capacity_note": "Pets allowed" },
+    { "id": "sh_c", "name": "Shelter C", "lat": 37.847, "lng": -122.258, "capacity_note": "Medical staff on site" }
+  ],
+  "people": [
+    {
+      "person_id": "p_amit",
+      "name": "Amit",
+      "role": "resident",
+      "phone": "+16175550101",
+      "lat": 37.851,
+      "lng": -122.224,
+      "language": "en",
+      "zone": "zone_3",
+      "household_id": "h_patel",
+      "family_contact": "p_priya",
+      "initial_status": "unconfirmed",
+      "simulated": false
+    },
+    {
+      "person_id": "p_priya",
+      "name": "Priya",
+      "role": "resident",
+      "phone": "+16175550102",
+      "lat": 37.859,
+      "lng": -122.229,
+      "language": "gu",
+      "zone": "zone_2",
+      "household_id": "h_patel",
+      "family_contact": "p_amit",
+      "initial_status": "unconfirmed",
+      "simulated": false
+    },
+    {
+      "person_id": "v_sam",
+      "name": "Sam",
+      "role": "volunteer",
+      "phone": "+16175550103",
+      "lat": 37.865,
+      "lng": -122.25,
+      "language": "en",
+      "zone": null,
+      "household_id": null,
+      "family_contact": null,
+      "initial_status": "safe",
+      "simulated": false
+    }
+  ],
+  "simulated_population": {
+    "count": 48,
+    "sos": 0,
+    "unconfirmed": 3,
+    "seed": 7,
+    "names": [
+      "Alex", "Bea", "Carlos", "Dana", "Eli", "Fatima", "Grace", "Hiro",
+      "Ines", "Jamal", "Kai", "Lena", "Mateo", "Nora", "Omar", "Pia",
+      "Quinn", "Rosa", "Sanjay", "Tess", "Uma", "Victor", "Wen", "Yara"
+    ],
+    "languages": ["en", "en", "en", "es", "zh", "gu"]
+  },
+  "units": [
+    { "unit_id": "u_4", "name": "Unit 4", "phone": "+16175550104" }
+  ],
+  "emergency_contact": { "label": "911 (demo phone)", "phone": "+16175550111" },
+  "agents": [
+    { "agent_id": "gov_county", "kind": "government", "household_id": null, "trusts": ["hh_patel"] },
+    { "agent_id": "hh_patel", "kind": "household", "household_id": "h_patel", "trusts": ["gov_county"] }
+  ],
+  "settings": {
+    "checkin_timeout_sec": 60,
+    "escalation_timeout_sec": 60,
+    "hazard_poll_sec": 30,
+    "alert_radius_km": 4,
+    "wake_phrase": "relay"
+  }
+}
