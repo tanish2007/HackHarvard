@@ -49,7 +49,24 @@ h1 {
   font-weight: 560;
 }
 
-#updated { color: #5c564c; }
+#updated, #forecast, #forecast-next { color: #5c564c; }
+
+#forecast {
+  margin-top: 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+#forecast-next, #route-note {
+  font-size: 0.82rem;
+}
+
+#route-note {
+  margin-top: 0.15rem;
+  font-weight: 700;
+  color: var(--ink);
+}
 
 #mode {
   font-weight: 700;
@@ -148,6 +165,15 @@ h1 {
 .dot.unconfirmed { background: var(--unconfirmed); }
 .dot.sos { background: var(--sos); box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.28); }
 .dot.en-route { background: var(--en-route); }
+
+.route-swatch {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0;
+  margin-right: 0.28rem;
+  border-top: 3px solid var(--ink);
+  vertical-align: middle;
+}
 
 .sos-pin span {
   display: block;

@@ -23,7 +23,7 @@ PORT = 8080
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data.state import build_state  # noqa: E402
+from data.state import build_route, build_state, build_weather  # noqa: E402
 
 
 def state_bytes():
@@ -50,12 +50,36 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(DASHBOARD_DIR), **kwargs)
 
     def do_GET(self):
-        """Route /state and the backup file, then static assets.
+        """Route /state, /weather, /route, and the backup file, then static assets.
 
-        Sends JSON for the two data paths. A failed /state leaves the
-        backup file untouched so the map can still show the last good picture.
+        Sends JSON for the data paths. A failed /state leaves the backup
+        file untouched so the map can still show the last good picture.
         """
         path = urlparse(self.path).path
+        if path == "/route":
+            try:
+                self._send(json.dumps(build_route()).encode("utf-8"))
+            except Exception as exc:
+                body = json.dumps({"error": str(exc)}).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            return
+        if path == "/weather":
+            try:
+                self._send(json.dumps(build_weather()).encode("utf-8"))
+            except Exception as exc:
+                body = json.dumps({"error": str(exc)}).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            return
         if path == "/state":
             try:
                 self._send(state_bytes())

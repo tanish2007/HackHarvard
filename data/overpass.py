@@ -1,7 +1,8 @@
 """OpenStreetMap shelters via the Overpass API.
 
-An empty answer raises DataSourceError so the caller can use the
-scenario list instead.
+The French mirror is tried first because the main server was refusing
+connections. Picnic shelters and gazebos are skipped. An empty answer
+raises DataSourceError so the caller can use the scenario list instead.
 """
 
 from __future__ import annotations
@@ -13,6 +14,11 @@ from data.errors import DataSourceError
 from data.geo import haversine_km
 
 AROUND_METERS = 8000
+ENDPOINTS = (
+    "https://overpass.openstreetmap.fr/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+)
+SKIP_SHELTER_TYPES = {"picnic_shelter", "gazebo", "sun_shelter"}
 
 
 def fetch_shelters(lat, lng):
@@ -35,9 +41,15 @@ def fetch_shelters(lat, lng):
         f'node["social_facility"="shelter"](around:{AROUND_METERS},{lat},{lng});'
         f");out center 15;"
     )
-    url = "https://overpass-api.de/api/interpreter?" + urlencode({"data": query})
     headers = {"User-Agent": "Relay/1.0 (HackHarvard demo)", "Accept": "application/json"}
-    return shelters_from_overpass(http.fetch_json(url, headers=headers), lat, lng)
+    last_error = DataSourceError("Overpass did not answer")
+    for endpoint in ENDPOINTS:
+        url = endpoint + "?" + urlencode({"data": query})
+        try:
+            return shelters_from_overpass(http.fetch_json(url, headers=headers), lat, lng)
+        except DataSourceError as exc:
+            last_error = exc
+    raise last_error
 
 
 def shelters_from_overpass(payload, lat, lng):
@@ -63,6 +75,8 @@ def shelters_from_overpass(payload, lat, lng):
         if point is None:
             continue
         tags = element.get("tags") or {}
+        if not tags.get("name") or tags.get("shelter_type") in SKIP_SHELTER_TYPES:
+            continue
         rows.append(
             {
                 "id": f"osm_{element.get('type', 'node')}_{element.get('id')}",

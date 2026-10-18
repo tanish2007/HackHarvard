@@ -19,6 +19,7 @@ const reportLayers = new Map();
 const unitLayers = new Map();
 const reports = L.layerGroup().addTo(map);
 const units = L.layerGroup().addTo(map);
+let routeLine = null;
 let fitted = false;
 let timelineKey = "";
 
@@ -267,7 +268,48 @@ async function loadBackup() {
   showBanner("Showing the saved backup. Live /state did not answer.", true);
 }
 
+async function loadForecast() {
+  try {
+    const forecast = await fetch("/weather", { cache: "no-store" }).then(readJson);
+    const temp = Math.round(forecast.temp_f);
+    const wind = Math.round(forecast.wind_mph);
+    const dir = forecast.wind_dir ? " " + forecast.wind_dir : "";
+    document.getElementById("forecast").textContent =
+      temp + "°F · " + wind + " mph" + dir + " · " + forecast.summary;
+    const next = forecast.next_2h || "";
+    document.getElementById("forecast-next").textContent =
+      next && next !== forecast.summary ? next : "";
+  } catch (err) {
+    return;
+  }
+}
+
+async function loadRoute() {
+  try {
+    const route = await fetch("/route", { cache: "no-store" }).then(readJson);
+    const line = (route.polyline || []).map((point) => [point.lat, point.lng]);
+    const note = document.getElementById("route-note");
+    if (!line.length) {
+      note.textContent = "";
+      return;
+    }
+    const label = route.person_name + " to " + route.shelter_name + " · " + route.duration_min + " min";
+    note.textContent = label;
+    if (routeLine) {
+      routeLine.setLatLngs(line);
+      routeLine.setTooltipContent(label);
+      return;
+    }
+    routeLine = L.polyline(line, { color: "#1c1915", weight: 4, opacity: 0.9 }).bindTooltip(label);
+    routeLine.addTo(map);
+  } catch (err) {
+    return;
+  }
+}
+
 async function tick() {
+  loadForecast();
+  loadRoute();
   try {
     const response = await fetch(stateUrl, { cache: "no-store" });
     render(await readJson(response));
