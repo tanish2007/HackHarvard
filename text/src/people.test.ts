@@ -60,6 +60,13 @@ test("scenario.local.json replaces the placeholder number", () => {
   assert.equal(directory.resolve("+16175550101").known, false);
 });
 
+test("phoneFor finds a number by person_id, and null for people without one", () => {
+  const directory = loadDirectory(scenarioDir({ phones: { p_amit: "+14134727634" } }));
+  assert.equal(directory.phoneFor("p_amit"), "+14134727634");
+  assert.equal(directory.phoneFor("sim_001"), null);
+  assert.equal(directory.phoneFor("nobody"), null);
+});
+
 test("a missing scenario.json is a clear error", () => {
   const empty = mkdtempSync(join(tmpdir(), "relay-empty-"));
   assert.throws(() => loadDirectory(empty), /Could not read/);
