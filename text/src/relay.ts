@@ -13,10 +13,15 @@ import { ACKNOWLEDGED, SOS_RECEIVED, handleText } from "./handler.js";
 import type { PeopleDirectory } from "./people.js";
 import type { Registry } from "./registry.js";
 
+/** How long Core gets to answer an SOS before we send our own acknowledgement. */
+export const SOS_ACK_DELAY_MS = 2000;
+
 /** What {@link processText} needs to run. */
 export interface RelayDeps {
   registry: Registry;
   directory: PeopleDirectory;
+  /** Wait for Core's SOS reply this long before acknowledging ourselves. Defaults to 2000. */
+  sosAckDelayMs?: number;
   /** Posts an event to Core. Never throws. */
   postEvent: (event: RelayEvent) => Promise<CoreResponse>;
   /** Logger for actions this lane cannot carry out. Defaults to console.warn. */
@@ -82,9 +87,19 @@ export async function processText(
   const who = deps.directory.resolve(phone);
   const event = buildEvent(deps, phone, text);
 
-  // Start the Core call first, then acknowledge while it is in flight.
+  // Start the Core call first. Core answers a call for help with its own SOS
+  // reply, so ours is only a stopgap: it goes out only if Core is still silent
+  // after a couple of seconds, so a person is never left waiting.
   const pending = deps.postEvent(event);
-  if (isDistress(text)) await send(SOS_RECEIVED);
+  const distress = isDistress(text);
+  let acknowledged = false;
+  if (distress) {
+    const early = await firstOf(pending, deps.sosAckDelayMs ?? SOS_ACK_DELAY_MS);
+    if (early === null) {
+      await send(SOS_RECEIVED);
+      acknowledged = true;
+    }
+  }
   const { actions } = await pending;
 
   let sent = 0;
@@ -100,5 +115,28 @@ export async function processText(
   }
 
   // Nobody is left without a reply, even if Core is down or has nothing to say.
-  if (sent === 0 && !isDistress(text)) await send(ACKNOWLEDGED);
+  if (sent === 0 && !acknowledged) await send(distress ? SOS_RECEIVED : ACKNOWLEDGED);
+}
+
+/**
+ * Wait for a promise, but only up to a time limit.
+ *
+ * Args:
+ *     promise: The work to wait for.
+ *     ms: How long to wait, in milliseconds.
+ *
+ * Returns:
+ *     The promise's result if it finishes in time, otherwise null. The promise
+ *     itself keeps running either way.
+ */
+async function firstOf<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
