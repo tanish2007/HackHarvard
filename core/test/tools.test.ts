@@ -78,7 +78,7 @@ describe("lookups", () => {
     const { store } = makeStore();
     const ctx = toolContext(store, { unitId: "u_4" });
     expect((await runTool("get_people_status", {}, ctx)).counts).toEqual(store.snapshot().counts);
-    expect((await runTool("get_people_status", { zone: "zone 3" }, ctx)).counts).toEqual({ safe: 15, unconfirmed: 2, sos: 0, en_route: 0 });
+    expect((await runTool("get_people_status", { zone: "zone 3" }, ctx)).counts).toEqual({ safe: 15, unconfirmed: 1, sos: 0, en_route: 0 });
   });
 
   it("finds the sender's family contact", async () => {

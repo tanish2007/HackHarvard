@@ -11,19 +11,19 @@ import { ROOT } from "./helpers.js";
 
 const scenario = loadScenario({ dir: ROOT, useLocal: false });
 const data = createStubData(scenario);
-const AMIT = { lat: 37.851, lng: -122.224 };
+const AMIT = { lat: 42.374, lng: -71.1175 };
 
 describe("data stub", () => {
   it("returns the fire near the fire and [] when out of range", async () => {
     expect(await data.getHazards(AMIT.lat, AMIT.lng, 5)).toEqual([
-      expect.objectContaining({ id: "hz_scenario_fire", kind: "fire", radius_km: 1.2, source: "fake" }),
+      expect.objectContaining({ id: "hz_scenario_fire", kind: "fire", radius_km: 1, source: "fake" }),
     ]);
     expect(await data.getHazards(0, 0, 50)).toEqual([]);
   });
 
   it("returns shelters nearest first with source fake", async () => {
     const shelters = await data.getShelters(AMIT.lat, AMIT.lng);
-    expect(shelters.map((s) => s.id)).toEqual(["sh_c", "sh_b", "sh_a"]);
+    expect(shelters.map((s) => s.id)).toEqual(["sh_a", "sh_c", "sh_b"]);
     expect(shelters.every((s) => s.source === "fake")).toBe(true);
   });
 
@@ -32,17 +32,17 @@ describe("data stub", () => {
   });
 
   it("goes straight when the line misses the fire", async () => {
-    const r = await data.getRoute(AMIT.lat, AMIT.lng, 37.847, -122.258);
+    const r = await data.getRoute(42.38, -71.12, 42.3825, -71.11);
     expect(r.polyline).toHaveLength(2);
     expect(r.avoided_hazards).toEqual([]);
   });
 
   it("detours around the fire when the line crosses it, and stays outside it", async () => {
-    const r = await data.getRoute(37.872, -122.17, 37.872, -122.24);
+    const r = await data.getRoute(42.365, -71.1, 42.365, -71.145);
     expect(r.polyline).toHaveLength(3);
     expect(r.avoided_hazards).toEqual(["hz_scenario_fire"]);
     const w = r.polyline[1];
-    expect(distanceKm(w.lat, w.lng, 37.872, -122.205)).toBeGreaterThan(1.2);
-    expect(r.distance_km).toBeGreaterThan(distanceKm(37.872, -122.17, 37.872, -122.24));
+    expect(distanceKm(w.lat, w.lng, 42.365, -71.122)).toBeGreaterThan(1);
+    expect(r.distance_km).toBeGreaterThan(distanceKm(42.365, -71.1, 42.365, -71.145));
   });
 });
