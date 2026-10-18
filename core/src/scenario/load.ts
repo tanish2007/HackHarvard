@@ -171,6 +171,10 @@ function checkReferences(file: ScenarioFile, people: ScenarioPerson[]): void {
   assertUnique("shelter id", file.shelters.map((s) => s.id));
   assertUnique("unit_id", file.units.map((u) => u.unit_id));
   assertUnique("agent_id", file.agents.map((a) => a.agent_id));
+  assertUnique("place id", file.places.map((p) => p.id));
+  if (!file.places.some((p) => p.id === file.settings.command_post)) {
+    throw new Error(`settings.command_post: unknown place "${file.settings.command_post}"`);
+  }
   assertUnique("person or unit id", [...people.map((p) => p.person_id), ...file.units.map((u) => u.unit_id), EMERGENCY_KEY]);
 
   // Inbound messages are matched to a sender by phone, so a shared number

@@ -26,6 +26,19 @@
     }
   ],
   "fire_area": { "lat": 37.872, "lng": -122.205, "radius_km": 1.2 },
+  "places": [
+    { "id": "pl_command_post", "name": "Command Post", "aliases": ["cp", "staging", "base"], "lat": 37.8605, "lng": -122.255 },
+    { "id": "pl_oak_st", "name": "Oak St", "aliases": ["oak street"], "lat": 37.856, "lng": -122.231 },
+    { "id": "pl_pine_ave", "name": "Pine Ave", "aliases": ["pine avenue"], "lat": 37.868, "lng": -122.229 },
+    { "id": "pl_route_24", "name": "Route 24", "aliases": ["highway 24", "hwy 24"], "lat": 37.852, "lng": -122.212 }
+  ],
+  "fake_weather": {
+    "summary": "Hot, dry, and gusty. Red flag warning in effect.",
+    "wind_mph": 22,
+    "wind_dir": "NE",
+    "temp_f": 91,
+    "next_2h": "Northeast wind 20 to 25 mph, gusts to 35, pushing the fire southwest toward Zone 1."
+  },
   "shelters": [
     { "id": "sh_a", "name": "Shelter A", "lat": 37.87, "lng": -122.27, "capacity_note": "Gym, about 200 cots" },
     { "id": "sh_b", "name": "Shelter B", "lat": 37.859, "lng": -122.262, "capacity_note": "Pets allowed" },
@@ -100,6 +113,7 @@
     "escalation_timeout_sec": 60,
     "hazard_poll_sec": 30,
     "alert_radius_km": 4,
-    "wake_phrase": "relay"
+    "wake_phrase": "relay",
+    "command_post": "pl_command_post"
   }
 }

@@ -71,6 +71,26 @@ const settingsSchema = z.object({
   hazard_poll_sec: z.number().positive(),
   alert_radius_km: z.number().positive(),
   wake_phrase: z.string().min(1),
+  /** Place id responders route from when they do not say where they are. */
+  command_post: z.string().min(1),
+});
+
+/** A named spot people say out loud: "route to Oak St". */
+const placeSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  aliases: z.array(z.string().min(1)),
+  lat: z.number(),
+  lng: z.number(),
+});
+
+/** Forecast the data stub returns until live NWS weather is wired in. */
+const fakeWeatherSchema = z.object({
+  summary: z.string(),
+  wind_mph: z.number(),
+  wind_dir: z.string(),
+  temp_f: z.number(),
+  next_2h: z.string(),
 });
 
 export const scenarioFileSchema = z.object({
@@ -82,6 +102,8 @@ export const scenarioFileSchema = z.object({
   relay_lines: z.object({ messaging: phoneSchema, voice: phoneSchema }),
   zones: z.array(zoneSchema),
   fire_area: z.object({ lat: z.number(), lng: z.number(), radius_km: z.number().positive() }),
+  places: z.array(placeSchema),
+  fake_weather: fakeWeatherSchema,
   shelters: z.array(shelterSchema),
   people: z.array(personSchema),
   simulated_population: simulatedPopulationSchema,
@@ -102,6 +124,7 @@ export const localOverrideSchema = z
 export type ScenarioFile = z.infer<typeof scenarioFileSchema>;
 export type LocalOverride = z.infer<typeof localOverrideSchema>;
 export type ScenarioPerson = z.infer<typeof personSchema>;
+export type ScenarioPlace = z.infer<typeof placeSchema>;
 export type PersonStatus = z.infer<typeof statusSchema>;
 
 /** A fully loaded scenario: real numbers merged in, simulated people generated. */
