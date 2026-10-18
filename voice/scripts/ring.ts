@@ -33,6 +33,7 @@ const placer = new ElevenLabsPlacer({
   agentId: need("ELEVENLABS_AGENT_ID"),
   phoneNumberId: need("ELEVENLABS_PHONE_NUMBER_ID"),
   resolveNumber: () => to,
+  timeoutMs: 30000,
 });
 
 await placer.placeCall(process.env.RING_PERSON_ID ?? "p_test", "This is Relay. Are you okay?", "smoke_test", null);
