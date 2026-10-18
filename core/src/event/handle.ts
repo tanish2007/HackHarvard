@@ -299,6 +299,9 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       // No welcome here: Text owns sign-up and already welcomed them before
       // forwarding anything, so this is a real question and gets an answer.
       if (person && event.location && !event.text.trim()) return [reply(replies.locationThanks(person.name, lang))];
+      // The wake phrase on its own ("Relay.") has no question yet. Say "go ahead"
+      // instead of sending the agent an empty request, which it cannot answer.
+      if (event.channel === "radio" && !text.trim()) return [reply(replies.radioReady(lang))];
       const channelKind = event.channel === "radio" ? "radio" : medium === "spoken" ? "voice" : "text";
       if (!deps.agent) return [reply(replies.fallback(incident, channelKind, lang))];
       const controller = new AbortController();

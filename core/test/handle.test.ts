@@ -478,6 +478,25 @@ describe("radio", () => {
     ]);
   });
 
+  it.each(["Relay", "Relay.", "relay,", "Relay!"])("says go ahead to %j on its own, without calling the agent", async (text) => {
+    const { store } = makeStore();
+    const { agent, calls } = recordingAgent();
+    const actions = await send(store, { channel: "radio", from: PHONES.unit4, text }, agent);
+    expect(actions).toEqual([{ type: "say", text: "Relay, go ahead." }]);
+    expect(calls).toHaveLength(0);
+    expect(rows(store)).toEqual([
+      ["radio", "Unit 4", text],
+      ["radio", "Relay", "Relay, go ahead."],
+    ]);
+  });
+
+  it("still hands a real question after the wake phrase to the agent", async () => {
+    const { store } = makeStore();
+    const { agent, calls } = recordingAgent();
+    await send(store, { channel: "radio", from: PHONES.unit4, text: "Relay, status?" }, agent);
+    expect(calls).toHaveLength(1);
+  });
+
   it("answers with the radio fallback when there is no agent", async () => {
     const { store } = makeStore();
     expect(await send(store, { channel: "radio", from: PHONES.unit4, text: "Relay, status?" })).toEqual([

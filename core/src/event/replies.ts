@@ -188,6 +188,13 @@ export const TEMPLATES = {
     gu: "Relay ને સંદેશ મળ્યો. અત્યારે આનો જવાબ આપી શકાય તેમ નથી. રાહ જુઓ.",
     hi: "Relay को संदेश मिला। अभी इसका जवाब नहीं दिया जा सकता। कृपया प्रतीक्षा करें।",
   },
+  radioReady: {
+    en: "Relay, go ahead.",
+    es: "Relay, adelante.",
+    zh: "Relay 收到，请讲。",
+    gu: "Relay અહીં છે, બોલો.",
+    hi: "Relay यहाँ है, बोलिए।",
+  },
   fireAlert: {
     en: "Relay alert for the {incident}, {name}: {where}.{shelter} Reply SAFE if you are safe, or SOS if you need help.",
     es: "Alerta de Relay por el {incident}, {name}: {where}.{shelter} Responda SAFE si está a salvo, o SOS si necesita ayuda.",
@@ -484,6 +491,19 @@ export const replies = {
     if (channel === "radio") return render("fallbackRadio", lang, {});
     if (channel === "voice") return render("fallbackVoice", lang, {});
     return render("fallbackText", lang, { incident });
+  },
+
+  /**
+   * Reply to the wake phrase said on its own on the radio, like "Relay."
+   *
+   * Args:
+   *     lang (string): The sender's language. Defaults to English.
+   *
+   * Returns:
+   *     string: A short "go ahead", so the responder knows Relay is listening.
+   */
+  radioReady(lang = "en"): string {
+    return render("radioReady", lang, {});
   },
 
   /**
