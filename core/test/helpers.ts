@@ -10,8 +10,11 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
+import type { LlmCall, LlmClient, LlmRequest, LlmResult } from "../src/agent/llm.js";
+import { TOOLS, type ToolContext } from "../src/agent/tools.js";
 import { createCoreRouter } from "../src/app.js";
 import type { RelayEvent } from "../src/contracts.js";
+import { createStubData } from "../src/data/stub.js";
 import type { Agent } from "../src/event/handle.js";
 import { loadScenario } from "../src/scenario/load.js";
 import type { Scenario } from "../src/scenario/schema.js";
@@ -154,6 +157,113 @@ export function coreApp(agent?: Agent) {
   const app = express();
   app.use(createCoreRouter({ scenario: store.scenario, store, agent }));
   return { app, store, advance };
+}
+
+/** One scripted model turn: a fixed result, or a function of the request. */
+export type ScriptStep = LlmResult | ((req: LlmRequest) => Promise<LlmResult>);
+
+/**
+ * A model turn that calls tools.
+ *
+ * Args:
+ *     calls (LlmCall[]): The tool calls, each { name, args, id? }.
+ *
+ * Returns:
+ *     LlmResult: A result with no text and those calls.
+ */
+export function toolCalls(...calls: LlmCall[]): LlmResult {
+  return { text: "", calls, content: { role: "model", parts: calls.map((c) => ({ functionCall: c })) } };
+}
+
+/**
+ * A model turn that answers in text.
+ *
+ * Args:
+ *     text (string): The answer.
+ *
+ * Returns:
+ *     LlmResult: A result with that text and no calls.
+ */
+export function answer(text: string): LlmResult {
+  return { text, calls: [], content: { role: "model", parts: [{ text }] } };
+}
+
+/**
+ * A fake LlmClient that plays back a script and records every request.
+ *
+ * Never talks to Gemini. Runs out loudly if the loop asks for more turns
+ * than scripted.
+ *
+ * Args:
+ *     steps (ScriptStep[]): One entry per generate() call, in order.
+ *
+ * Returns:
+ *     { llm: LlmClient, requests: LlmRequest[] }: The client and a log of the
+ *         requests it got, with contents copied at the time of the call.
+ */
+export function scriptedLlm(steps: ScriptStep[]) {
+  const requests: LlmRequest[] = [];
+  const queue = [...steps];
+  const llm: LlmClient = {
+    async generate(req) {
+      requests.push({ ...req, contents: structuredClone(req.contents) });
+      const step = queue.shift();
+      if (!step) throw new Error("scripted LLM ran out of turns");
+      return typeof step === "function" ? step(req) : step;
+    },
+  };
+  return { llm, requests };
+}
+
+/**
+ * A ToolContext for running a tool directly, as a person or as a unit.
+ *
+ * Args:
+ *     store (IncidentStore): The store.
+ *     as ({ personId?: string, unitId?: string, responder?: boolean }): Who
+ *         is asking. Defaults to Amit as a resident.
+ *
+ * Returns:
+ *     ToolContext: The context, with origin at the sender or the command post.
+ */
+export function toolContext(
+  store: IncidentStore,
+  as: { personId?: string; unitId?: string; responder?: boolean } = { personId: "p_amit" },
+): ToolContext {
+  const person = as.personId ? store.getPerson(as.personId) : undefined;
+  const unit = as.unitId ? store.findUnitByHandle(store.scenario.units.find((u) => u.unit_id === as.unitId)!.phone) : undefined;
+  const cp = store.scenario.places.find((p) => p.id === store.scenario.settings.command_post)!;
+  const origin =
+    person && person.lat !== null && person.lng !== null
+      ? { name: "the sender's location", lat: person.lat, lng: person.lng }
+      : { name: cp.name, lat: cp.lat, lng: cp.lng };
+  return {
+    store,
+    data: createStubData(store.scenario),
+    person,
+    unit,
+    who: unit?.name ?? person?.name ?? "Radio",
+    isResponder: as.responder ?? Boolean(unit),
+    origin,
+    extraActions: [],
+  };
+}
+
+/**
+ * Run one agent tool by name.
+ *
+ * Args:
+ *     name (string): Tool name.
+ *     args (Record<string, unknown>): Arguments, as the model would pass them.
+ *     ctx (ToolContext): The context.
+ *
+ * Returns:
+ *     Promise<any>: The tool's output.
+ */
+export async function runTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<any> {
+  const tool = TOOLS.find((t) => t.declaration.name === name);
+  if (!tool) throw new Error(`no tool named ${name}`);
+  return tool.run(args, ctx);
 }
 
 /**
