@@ -281,6 +281,40 @@ describe("radio", () => {
   });
 });
 
+describe("a misheard wake phrase", () => {
+  it.each([
+    ["Really, where is the nearest shelter?", "where is the nearest shelter?"],
+    ["Really where is the nearest shelter", "where is the nearest shelter"],
+    ["Rely, wind forecast?", "wind forecast?"],
+    ["REALLY. Is it safe to drive north?", "Is it safe to drive north?"],
+  ])("%j wakes Relay with the request after it", (text, rest) => {
+    expect(classify(text, "radio", "relay")).toEqual({ intent: "agent", text: rest });
+  });
+
+  it("does not wake on a bare 'Really?' with nothing after it", () => {
+    expect(classify("Really?", "radio", "relay").intent).toBe("radio_chatter");
+    expect(classify("really", "radio", "relay").intent).toBe("radio_chatter");
+  });
+
+  it("only counts as the first word", () => {
+    expect(classify("that is really bad", "radio", "relay").intent).toBe("radio_chatter");
+    expect(classify("unit four really, go ahead", "radio", "relay").intent).toBe("radio_chatter");
+  });
+
+  it("prefers the real wake phrase when both appear", () => {
+    expect(classify("Relay, really?", "radio", "relay")).toEqual({ intent: "agent", text: "really?" });
+  });
+
+  it("only applies to the wake phrase 'relay'", () => {
+    expect(classify("Really, copy?", "radio", "base").intent).toBe("radio_chatter");
+  });
+
+  it("does not run on text or voice, only radio", () => {
+    expect(classify("Really, where is the shelter?", "imessage", "relay").intent).toBe("agent");
+    expect(classify("Really, where is the shelter?", "imessage", "relay").text).toBe("Really, where is the shelter?");
+  });
+});
+
 describe("stripWakePhrase", () => {
   it("returns the rest of the message, or null", () => {
     expect(stripWakePhrase("Relay, route to Oak St avoiding the fire line?", "relay")).toBe(
