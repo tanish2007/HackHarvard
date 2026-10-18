@@ -1,0 +1,17 @@
+{
+  "elements": [
+    {
+      "type": "node",
+      "id": 11,
+      "lat": 37.779,
+      "lon": -122.417,
+      "tags": {"name": "Civic Shelter", "amenity": "shelter", "capacity": "120 cots"}
+    },
+    {
+      "type": "way",
+      "id": 22,
+      "center": {"lat": 37.724, "lon": -122.451},
+      "tags": {"name": "Ocean Shelter", "amenity": "shelter"}
+    }
+  ]
+}

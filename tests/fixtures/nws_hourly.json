@@ -1,0 +1,21 @@
+{
+  "properties": {
+    "temperatureUnit": "F",
+    "periods": [
+      {
+        "temperature": 86,
+        "temperatureUnit": "F",
+        "windSpeed": "28 mph",
+        "windDirection": "NE",
+        "shortForecast": "Red flag warning. Gusts from the northeast."
+      },
+      {
+        "temperature": 84,
+        "temperatureUnit": "F",
+        "windSpeed": "25 mph",
+        "windDirection": "NE",
+        "shortForecast": "Gusts ease slightly."
+      }
+    ]
+  }
+}

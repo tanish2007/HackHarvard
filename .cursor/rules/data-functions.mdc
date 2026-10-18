@@ -1,0 +1,29 @@
+---
+description: Contract C data functions never fail the demo
+globs: "data/**/*.py"
+alwaysApply: false
+---
+
+# Data functions
+
+`DATA_MODE=fake` (default) reads `scenario.json`. `DATA_MODE=real` calls the live source.
+
+Live calls must not raise to Tirth. On timeout or error, return the fake payload and set `source` to `fallback`.
+
+```python
+# BAD: FIRMS timeout crashes the agent
+return fetch_firms(lat, lng)
+
+# GOOD
+try:
+    return fetch_firms(lat, lng)
+except DataSourceError:
+    rows = fake_hazards(lat, lng, radius_km)
+    for row in rows:
+        row["source"] = "fallback"
+    return rows
+```
+
+In tests, catch the error and assert on `str(exc)`. Do not rely on exception class identity across workers.
+
+Fake routes must bend around the fire circle when the straight line crosses it. If OSRM is still fighting past hour 17, ship the polygon detour and stop.
