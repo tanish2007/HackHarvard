@@ -273,10 +273,11 @@ def _fake_shelters(lat, lng):
 
 
 def _fake_weather(lat, lng):
-    """Return a standing demo forecast.
+    """Return the scenario's demo forecast.
 
-    The scenario file has no weather block. These values keep the map wind
-    layer and the contract shape working until NWS is on.
+    Reads fake_weather from scenario.json, the same block Core's stub uses,
+    so the map's wind and Core's fire spread forecast always agree. Falls
+    back to a standing forecast if the scenario has no weather block.
 
     Args:
         lat (float): Latitude in decimal degrees. Unused by the fake.
@@ -286,6 +287,16 @@ def _fake_weather(lat, lng):
         dict: Forecast fields plus source fake.
     """
     del lat, lng
+    weather = load_scenario().get("fake_weather")
+    if weather:
+        return {
+            "summary": weather["summary"],
+            "wind_mph": weather["wind_mph"],
+            "wind_dir": weather["wind_dir"],
+            "temp_f": weather["temp_f"],
+            "next_2h": weather["next_2h"],
+            "source": "fake",
+        }
     return {
         "summary": "Dry and gusty",
         "wind_mph": 18,

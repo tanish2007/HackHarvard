@@ -12,6 +12,7 @@
 import type { RelayAction } from "../contracts.js";
 import type { DataTools } from "../data/types.js";
 import { familyAlert } from "../event/alerts.js";
+import { fireArrivalMinutes } from "../fire/forecast.js";
 import { compassDirection, distanceKm } from "../lib/geo.js";
 import type { PersonStatus } from "../scenario/schema.js";
 import type { IncidentStore, TrackedPerson, TrackedUnit } from "../state/store.js";
@@ -23,6 +24,9 @@ const MAX_NAMES = 10;
 
 /** A person counts as at a shelter within this distance of it. */
 const AT_SHELTER_KM = 0.3;
+
+/** Compass words by 45 degrees, for the spread heading. */
+const COMPASS_WORDS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
 
 /** Farthest a volunteer is sent to someone who needs help, in km. */
 const MATCH_RADIUS_KM = 5;
@@ -128,7 +132,7 @@ export const TOOLS: Tool[] = [
     declaration: {
       name: "get_hazards",
       description:
-        "Active fires and weather hazards near a place: kind, severity, distance, direction, and the compass direction that leads directly away. Use for questions about where the fire is, which way to go, or whether an area is dangerous.",
+        "Active fires and weather hazards near a place: kind, severity, distance, direction, and the compass direction that leads directly away. For fires with a spread forecast, also which way the fire is heading, how fast, and the estimated minutes until it reaches that place. Use for questions about where the fire is, where it is going, how long until it gets here, which way to go, or whether an area is dangerous.",
       parameters: { type: "object", properties: nearArg },
     },
     async run(args, ctx) {
@@ -137,15 +141,27 @@ export const TOOLS: Tool[] = [
       const hazards = await ctx.data.getHazards(at.lat, at.lng, radius);
       return {
         near: at.name,
-        hazards: hazards.map((h) => ({
-          kind: h.kind,
-          severity: h.severity,
-          distance_km: distanceKm(at.lat, at.lng, h.lat, h.lng),
-          direction: compassDirection(at.lat, at.lng, h.lat, h.lng),
-          move_away_toward: compassDirection(h.lat, h.lng, at.lat, at.lng),
-          radius_km: h.radius_km,
-          source: h.source,
-        })),
+        hazards: hazards.map((h) => {
+          const spread = ctx.store.getFireSpread(h.id);
+          const minutes = spread ? fireArrivalMinutes(h, spread, at) : null;
+          return {
+            kind: h.kind,
+            severity: h.severity,
+            distance_km: distanceKm(at.lat, at.lng, h.lat, h.lng),
+            direction: compassDirection(at.lat, at.lng, h.lat, h.lng),
+            move_away_toward: compassDirection(h.lat, h.lng, at.lat, at.lng),
+            radius_km: h.radius_km,
+            source: h.source,
+            ...(spread
+              ? {
+                  spread_heading_toward: COMPASS_WORDS[Math.round(spread.head_direction_deg / 45) % 8],
+                  spread_km_per_hour: Math.round(spread.head_m_per_min * 0.06 * 10) / 10,
+                  // Model estimate from the forecast time, not a promise.
+                  estimated_minutes_until_it_reaches_here: minutes === null || !Number.isFinite(minutes) ? null : Math.round(minutes),
+                }
+              : {}),
+          };
+        }),
       };
     },
   },
