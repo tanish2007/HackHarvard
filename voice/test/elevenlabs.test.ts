@@ -1,6 +1,6 @@
 /** Tests for the ElevenLabs call placer. */
 import { describe, expect, it, vi } from "vitest";
-import { ElevenLabsPlacer } from "../src/elevenlabs.js";
+import { ENGLISH_OPENING, ElevenLabsPlacer } from "../src/elevenlabs.js";
 
 const make = (fetchImpl: typeof fetch, known = true) =>
   new ElevenLabsPlacer({
@@ -52,7 +52,8 @@ describe("ElevenLabsPlacer", () => {
     await placer.placeCall("p_amit", "यह Relay है", "missed_checkin", null);
     const [, init] = f.mock.calls[0] as unknown as [string, RequestInit];
     const override = JSON.parse(init.body as string).conversation_initiation_client_data.conversation_config_override;
-    expect(override.agent).toEqual({ first_message: "यह Relay है", language: "hi" });
+    expect(override.agent).toEqual({ first_message: `${ENGLISH_OPENING} यह Relay है`, language: "hi" });
+    expect(override.agent.first_message.startsWith("This is Relay")).toBe(true);
   });
 
   it("leaves the language out when there is none", async () => {
