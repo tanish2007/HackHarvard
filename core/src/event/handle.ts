@@ -9,6 +9,7 @@ import type { CoreResponse, RelayAction, RelayEvent } from "../contracts.js";
 import { classify } from "../rules/fastpath.js";
 import type { PersonStatus } from "../scenario/schema.js";
 import type { IncidentStore, TrackedPerson, TrackedUnit } from "../state/store.js";
+import { familyAlert } from "./alerts.js";
 import { replies, type Medium } from "./replies.js";
 
 /**
@@ -20,6 +21,8 @@ import { replies, type Medium } from "./replies.js";
  *     person (TrackedPerson | undefined): The sender, if they are a person.
  *     unit (TrackedUnit | undefined): The sender, if they are a responder unit.
  *     who (string): Display name of the sender for the timeline.
+ *     signal (AbortSignal): Aborted when Core stops waiting, so the agent
+ *         can cancel its LLM call instead of running on in the background.
  */
 export interface AgentContext {
   event: RelayEvent;
@@ -27,6 +30,7 @@ export interface AgentContext {
   person: TrackedPerson | undefined;
   unit: TrackedUnit | undefined;
   who: string;
+  signal: AbortSignal;
 }
 
 /** The LLM agent, plugged in by the agent step. Returns actions to send. */
@@ -225,8 +229,10 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       if (person && event.location && !event.text.trim()) return [reply(replies.locationThanks(person.name))];
       const channelKind = event.channel === "radio" ? "radio" : medium === "spoken" ? "voice" : "text";
       if (!deps.agent) return [reply(replies.fallback(incident, channelKind))];
+      const controller = new AbortController();
       try {
-        return await withTimeout(deps.agent({ event, text, person, unit, who: sender.who }), AGENT_TIMEOUT_MS);
+        const run = deps.agent({ event, text, person, unit, who: sender.who, signal: controller.signal });
+        return await withTimeout(run, AGENT_TIMEOUT_MS, controller);
       } catch (err) {
         console.error(`[core] agent failed for ${event.event_id}:`, err);
         return [reply(replies.fallback(incident, channelKind))];
@@ -236,11 +242,13 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
 }
 
 /**
- * Reject if a promise takes longer than the limit.
+ * Reject if a promise takes longer than the limit, and abort its work.
  *
  * Args:
  *     promise (Promise<T>): The work to wait for.
  *     ms (number): Time limit in milliseconds.
+ *     controller (AbortController): Aborted when the limit passes, so the
+ *         work can cancel its network call.
  *
  * Returns:
  *     Promise<T>: The work's result.
@@ -248,36 +256,15 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
  * Raises:
  *     Error: "agent timed out" if the limit passes first.
  */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, controller: AbortController): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`agent timed out after ${ms}ms`)), ms);
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`agent timed out after ${ms}ms`));
+    }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-/**
- * Text the family contact about an SOS, if they have a phone.
- *
- * Args:
- *     person (TrackedPerson): The person who sent the SOS.
- *     store (IncidentStore): The live state.
- *
- * Returns:
- *     RelayAction[]: One send_text, or nothing if there is no reachable contact.
- */
-function familyAlert(person: TrackedPerson, store: IncidentStore): RelayAction[] {
-  const family = person.family_contact ? store.getPerson(person.family_contact) : undefined;
-  if (!family?.handle) return [];
-  return [
-    {
-      type: "send_text",
-      person_id: family.person_id,
-      to: family.handle,
-      text: replies.familySos(person.name, store.scenario.incident.name),
-      map_url: null,
-    },
-  ];
 }
 
 /**
