@@ -39,6 +39,25 @@ describe("parseCallContext", () => {
     });
   });
 
+  it("uses the caller ID on a call someone made to Relay", () => {
+    expect(
+      parseCallContext(sys("RELAY_CALL person_id=none caller_number=none caller_id=+14132305954")),
+    ).toEqual({ personId: null, callerNumber: "+14132305954" });
+  });
+
+  it("prefers the dialed number over the caller ID on a call Relay placed", () => {
+    expect(
+      parseCallContext(sys("RELAY_CALL person_id=p_amit caller_number=+14132305954 caller_id=+15312029769")),
+    ).toEqual({ personId: "p_amit", callerNumber: "+14132305954" });
+  });
+
+  it.each(["none", "NONE", "null", "unknown", "undefined"])("treats the placeholder %s as missing", (v) => {
+    expect(parseCallContext(sys(`RELAY_CALL person_id=${v} caller_number=${v}`))).toEqual({
+      personId: null,
+      callerNumber: null,
+    });
+  });
+
   it("returns nulls when the line is absent", () => {
     expect(parseCallContext(sys("nothing here"))).toEqual({ personId: null, callerNumber: null });
   });

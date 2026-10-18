@@ -12,9 +12,16 @@ export interface ChatMessage {
 export interface CallContext {
   /** The person id from the place_call that started the call, if any. */
   personId: string | null;
-  /** The number of the person on the call, if known. */
+  /**
+   * The number of the person on the call, if known. For a call Relay placed
+   * it is the number it dialed. For a call someone made to Relay it is their
+   * caller ID.
+   */
   callerNumber: string | null;
 }
+
+/** Values that mean "nothing was supplied": the agent's placeholders and blanks. */
+const MISSING = new Set(["", "none", "null", "unknown", "undefined"]);
 
 /**
  * Turn a message's content into plain text.
@@ -55,9 +62,12 @@ export function lastUserText(messages: ChatMessage[]): string {
  * Read the call context from the system prompt.
  *
  * The agent's prompt must contain one line, which ElevenLabs fills in with
- * the call's dynamic variables:
- *   RELAY_CALL person_id={{person_id}} caller_number={{caller_number}}
- * A value that was never filled in (still in braces) counts as missing.
+ * the call's variables:
+ *   RELAY_CALL person_id={{person_id}} caller_number={{caller_number}} caller_id={{system__caller_id}}
+ * On a call Relay placed, person_id and caller_number are supplied. On a call
+ * someone made to Relay they are not, so the agent's placeholders ("none")
+ * stand in and the number comes from caller_id instead. A value that was never
+ * filled in (still in braces) or is a placeholder counts as missing.
  *
  * Args:
  *   messages: The request's messages.
@@ -73,7 +83,10 @@ export function parseCallContext(messages: ChatMessage[]): CallContext {
   const pick = (key: string): string | null => {
     const m = new RegExp(String.raw`RELAY_CALL[^\n]*\b${key}=(\S+)`).exec(system);
     const v = m?.[1];
-    return v && !v.includes("{{") ? v : null;
+    return v && !v.includes("{{") && !MISSING.has(v.toLowerCase()) ? v : null;
   };
-  return { personId: pick("person_id"), callerNumber: pick("caller_number") };
+  return {
+    personId: pick("person_id"),
+    callerNumber: pick("caller_number") ?? pick("caller_id"),
+  };
 }
