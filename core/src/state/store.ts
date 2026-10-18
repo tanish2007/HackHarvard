@@ -13,6 +13,7 @@ import type {
   Hazard,
   Shelter,
   StateCounts,
+  StateHazard,
   StatePerson,
   StateReport,
   StateResponse,
@@ -127,6 +128,12 @@ export class IncidentStore {
   private lastText = new Map<string, string>();
   /** hazard id to its projected spread, from core/src/fire/. */
   private spreads = new Map<string, FireSpread>();
+  /**
+   * Live NASA FIRMS fires, kept apart from the incident hazards so they
+   * show on /state but never reach alerts, check-ins, or the agent's
+   * incident tools. Not cleared by reset: they are real, not demo state.
+   */
+  private liveFires: StateHazard[] = [];
   private offers = new Map<string, VolunteerOffer>();
   /** Where someone was the last time Relay told them which way to walk. */
   private directionFrom = new Map<string, { lat: number; lng: number }>();
@@ -588,6 +595,28 @@ export class IncidentStore {
   }
 
   /**
+   * Replace the live NASA fires shown on the map.
+   *
+   * Args:
+   *     fires (StateHazard[]): Live fires, each with its search area and an
+   *         optional spread forecast. [] clears them.
+   */
+  setLiveFires(fires: StateHazard[]): void {
+    this.liveFires = structuredClone(fires);
+    this.touch();
+  }
+
+  /**
+   * The live NASA fires shown on the map.
+   *
+   * Returns:
+   *     StateHazard[]: Copies.
+   */
+  listLiveFires(): StateHazard[] {
+    return structuredClone(this.liveFires);
+  }
+
+  /**
    * The projected spread of a fire, if one was computed.
    *
    * Args:
@@ -721,7 +750,7 @@ export class IncidentStore {
       hazards: this.hazards.map((h) => {
         const spread = this.spreads.get(h.id);
         return spread ? { ...h, spread: structuredClone(spread) } : { ...h };
-      }),
+      }).concat(structuredClone(this.liveFires)),
       shelters: this.shelters(),
       people: residents,
       volunteers,

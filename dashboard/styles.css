@@ -534,6 +534,38 @@ h1 {
   line-height: 1.35;
 }
 
+/* Live NASA fires, nearest first. Each flies the map to that fire. */
+#firms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+#firms-list:empty {
+  display: none;
+}
+
+.firms-go {
+  border: 0;
+  border-left: 3px solid #dc2626;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #fef2f2;
+  color: #7f1d1d;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.firms-go:hover,
+.firms-go:focus-visible {
+  background: #fee2e2;
+}
+
 .demo-controls {
   display: flex;
   flex-wrap: wrap;

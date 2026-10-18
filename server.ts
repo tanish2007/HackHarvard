@@ -9,6 +9,7 @@ import express from "express";
 import { createGeminiClient, DEFAULT_GEMINI_MODEL } from "./core/src/agent/gemini.js";
 import { createAgent } from "./core/src/agent/loop.js";
 import { createHazardWatcher } from "./core/src/alerts/watcher.js";
+import { createLiveFireFeed } from "./core/src/fire/live.js";
 import { createCoreRouter } from "./core/src/app.js";
 import { createHttpData } from "./core/src/data/http.js";
 import { createStubData } from "./core/src/data/stub.js";
@@ -93,5 +94,15 @@ app.listen(port, () => {
     console.log(`[core] fire alerts: auto, polling hazards every ${scenario.settings.hazard_poll_sec}s`);
   } else {
     console.log("[core] fire alerts: manual, POST /admin/alert to send them");
+  }
+  // Live NASA fires with spread forecasts, shown next to the staged incident.
+  // Read-only: they never trigger alerts. Needs the map server (FIRMS and
+  // NWS go through it). LIVE_FIRES_URL=off turns it off.
+  // 127.0.0.1, not localhost: the map server listens on IPv4 only, and Node
+  // tries IPv6 first for localhost.
+  const liveUrl = process.env.LIVE_FIRES_URL || "http://127.0.0.1:8080";
+  if (scenario.live_fires.enabled && liveUrl !== "off") {
+    createLiveFireFeed({ store, baseUrl: liveUrl }).start();
+    console.log(`[core] live NASA fires: from ${liveUrl}, every ${scenario.live_fires.refresh_minutes} min`);
   }
 });

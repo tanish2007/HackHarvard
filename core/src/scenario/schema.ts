@@ -99,6 +99,19 @@ const fireBehaviorSchema = z.object({
   forecast_minutes: z.array(z.number().positive()).min(1).default([30, 60, 120]),
 });
 
+/**
+ * Live NASA FIRMS fires shown next to the staged incident, for information
+ * only. They never trigger alerts. No areas means 50 km around the incident.
+ */
+const liveFiresSchema = z.object({
+  _readme: z.string().optional(),
+  enabled: z.boolean().default(true),
+  refresh_minutes: z.number().positive().default(10),
+  areas: z
+    .array(z.object({ name: z.string().min(1), lat: z.number(), lng: z.number(), radius_km: z.number().positive() }))
+    .default([]),
+});
+
 /** A named spot people say out loud: "route to Oak St". */
 const placeSchema = z.object({
   id: z.string().min(1),
@@ -140,6 +153,7 @@ export const scenarioFileSchema = z.object({
   agents: z.array(agentSchema),
   settings: settingsSchema,
   fire_behavior: fireBehaviorSchema.default(() => fireBehaviorSchema.parse({})),
+  live_fires: liveFiresSchema.default(() => liveFiresSchema.parse({})),
 });
 
 export const localOverrideSchema = z

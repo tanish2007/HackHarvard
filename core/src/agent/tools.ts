@@ -167,6 +167,36 @@ export const TOOLS: Tool[] = [
   },
   {
     declaration: {
+      name: "get_live_fires",
+      description:
+        "Real wildfires detected by NASA satellites (FIRMS) in the last 2 days, separate from this incident: where, how far from the incident, and, where live wind is available, which way and how fast each is spreading. Use when someone asks about real or live fires right now, or what NASA sees.",
+      parameters: { type: "object", properties: {} },
+    },
+    async run(_args, ctx) {
+      const c = ctx.store.scenario.incident.center;
+      const fires = ctx.store
+        .listLiveFires()
+        .map((f) => ({ f, km: distanceKm(c.lat, c.lng, f.lat, f.lng) }))
+        .sort((a, b) => a.km - b.km)
+        .slice(0, 8);
+      return {
+        source: "NASA FIRMS satellite detections (VIIRS), last 2 days. Not part of this incident.",
+        count: ctx.store.listLiveFires().length,
+        fires: fires.map(({ f, km }) => ({
+          area: f.area ?? null,
+          km_from_incident: Math.round(km),
+          direction_from_incident: compassDirection(c.lat, c.lng, f.lat, f.lng),
+          severity: f.severity,
+          radius_km: f.radius_km,
+          spread_heading_toward: f.spread ? COMPASS_WORDS[Math.round(f.spread.head_direction_deg / 45) % 8] : null,
+          spread_km_per_hour: f.spread ? Math.round(f.spread.head_m_per_min * 0.06 * 10) / 10 : null,
+          wind: f.spread ? `${f.spread.wind_mph} mph from ${COMPASS_WORDS[Math.round(f.spread.wind_from_deg / 45) % 8]}` : null,
+        })),
+      };
+    },
+  },
+  {
+    declaration: {
       name: "plan_route",
       description:
         "A route that avoids fire areas, with distance, minutes, and steps. For a resident this is a walking path from their current location to the place they named. Use for any 'route to', 'how do I get to', 'take me to', 'where should I go', or 'nearest shelter' question.",
