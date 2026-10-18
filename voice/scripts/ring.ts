@@ -34,5 +34,5 @@ const placer = new ElevenLabsPlacer({
   resolveNumber: () => to,
 });
 
-await placer.placeCall("p_test", "This is Relay. Are you okay?", "smoke_test");
+await placer.placeCall("p_test", "This is Relay. Are you okay?", "smoke_test", null);
 console.log(`call requested to ${to}`);

@@ -26,6 +26,8 @@ export interface CallPlacer {
    *   personId: The Contract E person id to call.
    *   script: What Relay should say when the call connects.
    *   reason: Why the call is being placed, for example missed_checkin.
+   *   to: The number to dial if Core supplied one. When null, the placer
+   *     looks the person up itself.
    */
-  placeCall(personId: string, script: string, reason: string): Promise<void>;
+  placeCall(personId: string, script: string, reason: string, to: string | null): Promise<void>;
 }

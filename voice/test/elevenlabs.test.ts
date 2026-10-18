@@ -14,7 +14,7 @@ const make = (fetchImpl: typeof fetch, known = true) =>
 describe("ElevenLabsPlacer", () => {
   it("posts the outbound call request", async () => {
     const f = vi.fn(async () => new Response("{}", { status: 200 }));
-    await make(f as unknown as typeof fetch).placeCall("p_amit", "Are you okay?", "missed_checkin");
+    await make(f as unknown as typeof fetch).placeCall("p_amit", "Are you okay?", "missed_checkin", null);
     const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call");
     expect((init.headers as Record<string, string>)["xi-api-key"]).toBe("key");
@@ -27,10 +27,17 @@ describe("ElevenLabsPlacer", () => {
     expect(body.conversation_initiation_client_data.conversation_config_override.agent.first_message).toBe("Are you okay?");
   });
 
+  it("dials the number Core supplied instead of the lookup", async () => {
+    const f = vi.fn(async () => new Response("{}", { status: 200 }));
+    await make(f as unknown as typeof fetch, false).placeCall("p_new", "hi", "r", "+15559998888");
+    const [, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string).to_number).toBe("+15559998888");
+  });
+
   it("throws when the person has no number", async () => {
     const f = vi.fn();
     await expect(
-      make(f as unknown as typeof fetch, false).placeCall("p_amit", "hi", "r"),
+      make(f as unknown as typeof fetch, false).placeCall("p_amit", "hi", "r", null),
     ).rejects.toThrow("no phone number");
     expect(f).not.toHaveBeenCalled();
   });
@@ -38,7 +45,7 @@ describe("ElevenLabsPlacer", () => {
   it("throws with the status when ElevenLabs rejects", async () => {
     const f = vi.fn(async () => new Response("bad agent", { status: 422 }));
     await expect(
-      make(f as unknown as typeof fetch).placeCall("p_amit", "hi", "r"),
+      make(f as unknown as typeof fetch).placeCall("p_amit", "hi", "r", null),
     ).rejects.toThrow("422");
   });
 });

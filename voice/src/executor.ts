@@ -41,7 +41,7 @@ export async function executeActions(
         }
         await deps.session.speak(action.text);
       } else if (action.type === "place_call") {
-        await deps.placer.placeCall(action.person_id, action.script, action.reason);
+        await deps.placer.placeCall(action.person_id, action.script, action.reason, action.to);
       } else {
         log(`unsupported action type for voice: ${(action as { type: string }).type}`);
       }
