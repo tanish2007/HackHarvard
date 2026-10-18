@@ -178,7 +178,7 @@ function resolveSender(event: RelayEvent, deps: HandlerDeps): Sender {
   if (unit) store.markUnitHeard(unit.unit_id);
   if (person) {
     // Switch language only when the message clearly is in another one, so
-    // even the welcome to a new Spanish texter is in Spanish.
+    // even the first reply to a new Spanish texter is in Spanish.
     const detected = event.channel === "radio" ? null : detectLanguage(event.text);
     if (detected && detected !== resolveLang(person.language)) store.setLanguage(person.person_id, detected);
     store.recordContact(person.person_id, event.location, event.text);
@@ -274,8 +274,8 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
     }
 
     case "agent": {
-      if (sender.isNew) return [reply(replies.welcome(incident, event.location !== null, lang))];
-      if (sender.rejoined && person) return [reply(replies.welcomeBack(person.name, incident, lang))];
+      // No welcome here: Text owns sign-up and already welcomed them before
+      // forwarding anything, so this is a real question and gets an answer.
       if (person && event.location && !event.text.trim()) return [reply(replies.locationThanks(person.name, lang))];
       const channelKind = event.channel === "radio" ? "radio" : medium === "spoken" ? "voice" : "text";
       if (!deps.agent) return [reply(replies.fallback(incident, channelKind, lang))];
