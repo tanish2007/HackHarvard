@@ -43,10 +43,14 @@ export type Agent = (ctx: AgentContext) => Promise<RelayAction[]>;
  *     store (IncidentStore): The live incident state.
  *     agent (Agent | undefined): The LLM agent. Without it, unmatched
  *         messages get a fixed fallback reply.
+ *     escalation ({ contactReceived(personId: string): void } | undefined):
+ *         Told whenever a person gets in touch, so their check-in chain
+ *         stops. Without it, no chains run.
  */
 export interface HandlerDeps {
   store: IncidentStore;
   agent?: Agent;
+  escalation?: { contactReceived(personId: string): void };
 }
 
 /** Who sent an event, after looking them up. */
@@ -94,7 +98,7 @@ export async function handleEvent(event: RelayEvent, deps: HandlerDeps): Promise
   if (running) return structuredClone(await running);
 
   const work = (async () => {
-    const sender = resolveSender(event, deps.store);
+    const sender = resolveSender(event, deps);
     const response = { actions: await route(event, sender, deps) };
     deps.store.rememberResponse(key, response);
     logActions(deps.store, event, response.actions, sender);
@@ -111,15 +115,19 @@ export async function handleEvent(event: RelayEvent, deps: HandlerDeps): Promise
 /**
  * Work out who sent the event, record the contact, and log the message.
  *
+ * A person getting in touch also stops their check-in chain, whatever they
+ * said, since Relay has now heard from them.
+ *
  * Args:
  *     event (RelayEvent): The event.
- *     store (IncidentStore): The live state.
+ *     deps (HandlerDeps): The store and the optional escalation engine.
  *
  * Returns:
  *     Sender: The person or unit, a display name, and whether they just
  *         signed up or came back after STOP.
  */
-function resolveSender(event: RelayEvent, store: IncidentStore): Sender {
+function resolveSender(event: RelayEvent, deps: HandlerDeps): Sender {
+  const { store } = deps;
   const unit = store.findUnitByHandle(event.from);
   let person = unit ? undefined : (event.person_id ? store.getPerson(event.person_id) : undefined) ?? store.findPersonByHandle(event.from);
   let isNew = false;
@@ -138,7 +146,7 @@ function resolveSender(event: RelayEvent, store: IncidentStore): Sender {
 
   if (unit) store.markUnitHeard(unit.unit_id);
   if (person) {
-    store.recordContact(person.person_id, event.location);
+    store.recordContact(person.person_id, event.location, event.text);
     person = store.getPerson(person.person_id);
   }
 
@@ -146,6 +154,8 @@ function resolveSender(event: RelayEvent, store: IncidentStore): Sender {
   store.addTimeline({ channel: event.channel, who, text: describeInbound(event) });
   if (isNew) store.addTimeline({ channel: "system", who: "Relay", text: `${who} signed up by text` });
   if (rejoined) store.addTimeline({ channel: "system", who: "Relay", text: `${who} signed up again after STOP` });
+  // After the inbound line, so the timeline reads "Amit: ..." then "check-in stopped".
+  if (person) deps.escalation?.contactReceived(person.person_id);
   return { person, unit, who, isNew, rejoined };
 }
 

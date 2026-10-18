@@ -9,6 +9,8 @@ import { replies } from "./replies.js";
  * Log actions Core sent on its own (not as a reply), so they show on the
  * timeline like every other exchange.
  *
+ * The emergency contact is named by its scenario label, never its number.
+ *
  * Args:
  *     store (IncidentStore): The live state.
  *     actions (RelayAction[]): What was pushed.
@@ -16,7 +18,9 @@ import { replies } from "./replies.js";
 export function logPushed(store: IncidentStore, actions: RelayAction[]): void {
   for (const a of actions) {
     if (a.type === "say") continue;
-    const name = store.getPerson(a.person_id)?.name ?? a.person_id;
+    const name =
+      store.getPerson(a.person_id)?.name ??
+      (a.person_id === "emergency_contact" ? store.scenario.emergency_contact.label : a.person_id);
     if (a.type === "send_text") store.addTimeline({ channel: "imessage", who: "Relay", text: `To ${name}: ${a.text}` });
     else store.addTimeline({ channel: "voice", who: "Relay", text: `Calling ${name} (${a.reason}): ${a.script}` });
   }

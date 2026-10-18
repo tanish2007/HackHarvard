@@ -73,6 +73,11 @@ const settingsSchema = z.object({
   wake_phrase: z.string().min(1),
   /** Place id responders route from when they do not say where they are. */
   command_post: z.string().min(1),
+  /**
+   * "auto" polls hazards and sends fire alerts on its own. "manual" waits
+   * for POST /admin/alert, so the demo picks the moment. Defaults to manual.
+   */
+  alerts: z.enum(["manual", "auto"]).default("manual"),
 });
 
 /** A named spot people say out loud: "route to Oak St". */
