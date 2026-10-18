@@ -19,7 +19,7 @@ import type { PlaceCallAction } from "../contracts.js";
 import type { Dispatcher, PushResult } from "../dispatch/outbound.js";
 import { logPushed } from "../event/alerts.js";
 import { replies } from "../event/replies.js";
-import { distanceKm } from "../lib/geo.js";
+import { distanceKm, escapeFrom } from "../lib/geo.js";
 import { realScheduler, type Cancel, type Scheduler } from "../lib/scheduler.js";
 import type { PersonStatus } from "../scenario/schema.js";
 import type { IncidentStore, TrackedPerson } from "../state/store.js";
@@ -203,11 +203,14 @@ export function createEscalationEngine(options: EscalationOptions): EscalationEn
 
     if (chain.stage === "checkin") {
       if (isCallable(person.handle)) {
+        // Tell them which way is away from the fire before asking anything.
+        const fires = store.listHazards().filter((h) => h.kind === "fire");
+        const escape = person.lat !== null && person.lng !== null ? escapeFrom(person.lat, person.lng, fires) : null;
         await pushCall({
           type: "place_call",
           person_id: person.person_id,
           to: person.handle,
-          script: replies.checkinCall(incident, person.language),
+          script: replies.checkinCall(incident, person.language, escape ?? undefined),
           reason: "missed_checkin",
         });
       } else {
