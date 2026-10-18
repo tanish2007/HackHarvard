@@ -7,14 +7,19 @@
     "start": "tsx --env-file=.env src/index.ts",
     "dev": "tsx watch --env-file=.env src/index.ts",
     "test": "tsx --test src/*.test.ts",
-    "fake-core": "tsx src/dev/fakeCore.ts"
+    "fake-core": "tsx src/dev/fakeCore.ts",
+    "findmy-check": "tsx --env-file=.env src/dev/findmyCheck.ts"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.6",
+    "@photon-ai/advanced-imessage": "^2.3.0",
+    "nice-grpc": "^2.1.17",
+    "nice-grpc-common": "^2.0.4",
     "spectrum-ts": "^12.11.0"
   },
   "devDependencies": {
-    "typescript": "^5",
     "@types/node": "^22",
-    "tsx": "^4"
+    "tsx": "^4",
+    "typescript": "^5"
   }
 }
