@@ -4,7 +4,7 @@
  * This module has no Photon code in it, so it can be tested on its own.
  */
 
-import { parseCommand } from "./commands.js";
+import { isDistress, parseCommand } from "./commands.js";
 import type { Registry } from "./registry.js";
 
 export const WELCOME =
@@ -13,12 +13,17 @@ export const WELCOME =
 export const GOODBYE = "You've been removed from Relay. Text JOIN to sign up again.";
 export const NOT_SIGNED_UP = "You're not signed up for Relay. Text JOIN to get wildfire alerts.";
 export const ACKNOWLEDGED = "Relay got your message.";
+export const SOS_RECEIVED =
+  "SOS received. I'm flagging this for responders now. " +
+  "If you are in immediate danger, call 911.";
 
 /**
  * Work out the reply for one incoming text and update the registry.
  *
  * A first-time sender is signed up automatically. Someone who sent STOP stays
- * out until they text JOIN.
+ * out until they text JOIN, except that a call for help always goes through:
+ * it is passed on to Core even from someone who is signed out, and it does not
+ * sign them back in.
  *
  * @param registry - Who has opted in so far.
  * @param phone - The sender's phone number in E.164 format.
@@ -33,6 +38,11 @@ export function handleText(registry: Registry, phone: string, text: string): str
   if (command === "stop") {
     registry.optOut(phone);
     return GOODBYE;
+  }
+
+  if (command !== "join" && isDistress(text)) {
+    if (status === "unknown") registry.optIn(phone);
+    return null;
   }
 
   if (command === "join" || status === "unknown") {

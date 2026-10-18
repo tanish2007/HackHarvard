@@ -33,9 +33,9 @@ for await (const [space, message] of app.messages) {
   if (message.content.type !== "text" || !phone) continue;
 
   try {
-    for (const reply of await processText(deps, phone, message.content.text)) {
+    await processText(deps, phone, message.content.text, async (reply) => {
       await space.send(reply);
-    }
+    });
   } catch (err) {
     // One bad message must not stop the bot from reading the next one.
     console.error(`[text] failed to handle a message from ${phone}:`, err);

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseCommand } from "./commands.js";
+import { isDistress, parseCommand } from "./commands.js";
 import { ACKNOWLEDGED, GOODBYE, NOT_SIGNED_UP, WELCOME, handleText } from "./handler.js";
 import { Registry } from "./registry.js";
 
@@ -26,6 +26,18 @@ test("parseCommand recognises JOIN", () => {
 test("parseCommand ignores keywords inside longer sentences", () => {
   for (const text of ["stop the fire", "my car won't start", "SOS", ""]) {
     assert.equal(parseCommand(text), "other", text);
+  }
+});
+
+test("isDistress catches calls for help anywhere in a message", () => {
+  for (const text of ["SOS", "sos!", "SOS my house is on fire", "I need help", "please help me", "Emergency", "I'm trapped"]) {
+    assert.equal(isDistress(text), true, text);
+  }
+});
+
+test("isDistress ignores ordinary messages", () => {
+  for (const text of ["hello", "where is the shelter", "STOP", "thanks", "sosa is my neighbor"]) {
+    assert.equal(isDistress(text), false, text);
   }
 });
 
