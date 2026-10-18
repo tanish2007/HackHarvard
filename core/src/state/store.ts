@@ -20,7 +20,7 @@ import type {
   TimelineEntry,
 } from "../contracts.js";
 import { distanceKm } from "../lib/geo.js";
-import { normalizeHandle } from "../lib/phone.js";
+import { handleKey } from "../lib/phone.js";
 import type { PersonStatus, Scenario } from "../scenario/schema.js";
 
 /** Oldest timeline entries are dropped past this, so /state stays small. */
@@ -109,6 +109,7 @@ export class IncidentStore {
   private reports: StateReport[] = [];
   private timeline: TimelineEntry[] = [];
   private seenEvents = new Map<string, CoreResponse>();
+  private optedOut = new Map<string, TrackedPerson>();
   private newPeopleCount = 0;
   private updatedAt = "";
 
@@ -139,7 +140,7 @@ export class IncidentStore {
           person_id: p.person_id,
           name: p.name,
           role: p.role,
-          handle: p.phone ? normalizeHandle(p.phone) : null,
+          handle: p.phone ? handleKey(p.phone) : null,
           status: p.initial_status,
           lat: p.lat,
           lng: p.lng,
@@ -155,7 +156,7 @@ export class IncidentStore {
     this.units = new Map(
       this.scenario.units.map((u) => [
         u.unit_id,
-        { unit_id: u.unit_id, name: u.name, handle: normalizeHandle(u.phone) ?? u.phone, last_heard: null },
+        { unit_id: u.unit_id, name: u.name, handle: handleKey(u.phone) ?? u.phone, last_heard: null },
       ]),
     );
     const fire = this.scenario.fire_area;
@@ -175,6 +176,7 @@ export class IncidentStore {
     this.reports = [];
     this.timeline = [];
     this.seenEvents = new Map();
+    this.optedOut = new Map();
     this.newPeopleCount = 0;
     this.updatedAt = at;
   }
@@ -203,7 +205,7 @@ export class IncidentStore {
    *     TrackedPerson | undefined: A copy, or undefined if nobody matches.
    */
   findPersonByHandle(handle: string): TrackedPerson | undefined {
-    const h = normalizeHandle(handle);
+    const h = handleKey(handle);
     if (!h) return undefined;
     for (const p of this.people.values()) if (p.handle === h) return { ...p };
     return undefined;
@@ -219,7 +221,7 @@ export class IncidentStore {
    *     TrackedUnit | undefined: A copy, or undefined if no unit matches.
    */
   findUnitByHandle(handle: string): TrackedUnit | undefined {
-    const h = normalizeHandle(handle);
+    const h = handleKey(handle);
     if (!h) return undefined;
     for (const u of this.units.values()) if (u.handle === h) return { ...u };
     return undefined;
@@ -243,7 +245,7 @@ export class IncidentStore {
       person_id: id,
       name: `New resident ${this.newPeopleCount}`,
       role: "resident",
-      handle: normalizeHandle(handle) ?? handle,
+      handle: handleKey(handle) ?? handle,
       status: "unconfirmed",
       lat: location?.lat ?? null,
       lng: location?.lng ?? null,
@@ -262,6 +264,9 @@ export class IncidentStore {
   /**
    * Remove a person, for STOP.
    *
+   * They are kept aside, so if they text again they come back with their
+   * name, household, and family contact instead of as a stranger.
+   *
    * Args:
    *     personId (string): Who to remove.
    *
@@ -269,9 +274,36 @@ export class IncidentStore {
    *     boolean: True if they were there.
    */
   removePerson(personId: string): boolean {
-    const removed = this.people.delete(personId);
-    if (removed) this.touch();
-    return removed;
+    const person = this.people.get(personId);
+    if (!person) return false;
+    this.people.delete(personId);
+    this.optedOut.set(personId, person);
+    this.touch();
+    return true;
+  }
+
+  /**
+   * Bring back someone who sent STOP and then texted again.
+   *
+   * Args:
+   *     handle (string): The handle they are texting from.
+   *
+   * Returns:
+   *     TrackedPerson | undefined: A copy of the restored person, status
+   *         unconfirmed, or undefined if nobody with that handle opted out.
+   */
+  restoreByHandle(handle: string): TrackedPerson | undefined {
+    const h = handleKey(handle);
+    if (!h) return undefined;
+    for (const [id, p] of this.optedOut) {
+      if (p.handle !== h) continue;
+      this.optedOut.delete(id);
+      const restored = { ...p, status: p.status === "sos" ? p.status : ("unconfirmed" as PersonStatus) };
+      this.people.set(id, restored);
+      this.touch();
+      return { ...restored };
+    }
+    return undefined;
   }
 
   /**
@@ -387,9 +419,10 @@ export class IncidentStore {
   /**
    * Build the Contract D body for GET /state.
    *
-   * People without a known location are left off the map and the counts
-   * until they share one. A volunteer in SOS is shown as a person in SOS,
-   * not as an available volunteer.
+   * People without a known location are left off the map (a marker needs
+   * coordinates) but still counted, so an SOS from someone who has not
+   * shared a location still shows in counts.sos. A volunteer in SOS is
+   * counted and shown as a person in SOS, not as an available volunteer.
    *
    * Returns:
    *     StateResponse: A fresh copy. Every list is present, [] when empty.
@@ -397,10 +430,13 @@ export class IncidentStore {
   snapshot(): StateResponse {
     const residents: StatePerson[] = [];
     const volunteers: StateVolunteer[] = [];
+    const counts: StateCounts = { safe: 0, unconfirmed: 0, sos: 0, en_route: 0 };
 
     for (const p of this.people.values()) {
+      const asVolunteer = p.role === "volunteer" && p.status !== "sos";
+      if (!asVolunteer) counts[p.status]++;
       if (p.lat === null || p.lng === null) continue;
-      if (p.role === "volunteer" && p.status !== "sos") {
+      if (asVolunteer) {
         volunteers.push({
           volunteer_id: p.person_id,
           name: p.name,
@@ -434,7 +470,7 @@ export class IncidentStore {
       reports: this.reports.map((r) => ({ ...r })),
       units: [...this.units.values()].map((u): StateUnit => ({ unit_id: u.unit_id, name: u.name, last_heard: u.last_heard })),
       timeline: this.timeline.map((t) => ({ ...t })),
-      counts: countStatuses(residents),
+      counts,
     };
   }
 
@@ -471,19 +507,4 @@ export class IncidentStore {
   private touch(): void {
     this.updatedAt = this.nowIso();
   }
-}
-
-/**
- * Count residents by status.
- *
- * Args:
- *     people (StatePerson[]): Residents on the map.
- *
- * Returns:
- *     StateCounts: How many are in each status.
- */
-function countStatuses(people: StatePerson[]): StateCounts {
-  const counts: StateCounts = { safe: 0, unconfirmed: 0, sos: 0, en_route: 0 };
-  for (const p of people) counts[p.status]++;
-  return counts;
 }
