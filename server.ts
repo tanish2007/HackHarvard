@@ -10,6 +10,7 @@ import { createGeminiClient, DEFAULT_GEMINI_MODEL } from "./core/src/agent/gemin
 import { createAgent } from "./core/src/agent/loop.js";
 import { createHazardWatcher } from "./core/src/alerts/watcher.js";
 import { createCoreRouter } from "./core/src/app.js";
+import { createHttpData } from "./core/src/data/http.js";
 import { createStubData } from "./core/src/data/stub.js";
 import { createHttpDispatcher } from "./core/src/dispatch/outbound.js";
 import { createEscalationEngine } from "./core/src/escalation/engine.js";
@@ -30,9 +31,14 @@ if (placeholders.length > 0) {
 }
 
 const store = new IncidentStore(scenario);
-// Rudra's Contract C functions are Python. Until they are reachable over
-// HTTP, the agent uses a TypeScript stub with the same shapes.
-const data = createStubData(scenario);
+// Rudra's Contract C functions are Python, served by the map server. With
+// DATA_URL set, Core asks them over HTTP, so "nearest shelter" can be a real
+// shelter near where the person is. Without it, or when a call fails, the
+// agent uses a TypeScript stub with the same shapes, built from the scenario.
+const stub = createStubData(scenario);
+const dataUrl = process.env.DATA_URL || undefined;
+const data = dataUrl ? createHttpData({ baseUrl: dataUrl, fallback: stub }) : stub;
+console.log(dataUrl ? `[core] data: ${dataUrl}, the scenario is the fallback` : "[core] data: scenario only (set DATA_URL for real data)");
 // Pushes actions Core starts on its own (alerts, timers) to Text and Voice.
 const dispatcher = createHttpDispatcher({
   textUrl: process.env.TEXT_ACTIONS_URL || undefined,
