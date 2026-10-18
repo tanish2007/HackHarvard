@@ -398,11 +398,26 @@ function hasUnnegatedPhrase(clause: string, phrases: string[]): boolean {
 }
 
 /**
+ * Words speech recognition writes when someone says the wake phrase.
+ *
+ * Keyed by the normalized wake phrase. "Relay" is often heard as "Really" or
+ * "Rely" on a radio call. These count only as the very first word, and only
+ * when something follows, so "that is really bad" and a bare "Really?" do not
+ * wake Relay. They apply to the wake phrase "relay" only, since another
+ * scenario's phrase would have different mishearings.
+ */
+const WAKE_ALIASES: Record<string, string[]> = {
+  relay: ["really", "rely"],
+};
+
+/**
  * Find the wake phrase near the start of a radio message.
  *
  * Accepts "Relay, ..." and "Unit 4 to Relay, ...", and multi-word phrases
  * like "hey relay". The phrase must start within the first five words, so
- * "tell Relay later" deep in a sentence does not trigger it.
+ * "tell Relay later" deep in a sentence does not trigger it. A common
+ * mishearing of "relay" counts too, as the first word with a request after it
+ * (see WAKE_ALIASES).
  *
  * Args:
  *     text (string): Raw radio text.
@@ -422,6 +437,12 @@ export function stripWakePhrase(text: string, wakePhrase: string): string | null
     if (wake.every((w, j) => plain[i + j] === w)) {
       return words.slice(i + wake.length).join(" ").replace(/^[,.:;!?\s-]+/, "");
     }
+  }
+
+  // A misheard wake phrase, only as the first word and only with a request after it.
+  if ((WAKE_ALIASES[wake.join(" ")] ?? []).includes(plain[0] ?? "")) {
+    const rest = words.slice(1).join(" ").replace(/^[,.:;!?\s-]+/, "");
+    if (rest) return rest;
   }
   return null;
 }
