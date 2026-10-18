@@ -21,14 +21,17 @@ export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
  *     thinkingLevel (string | undefined): Optional thinking level, e.g.
  *         "low". Unset leaves the model's default.
  *     fallbackModels (string[] | undefined): Other models to try, in order,
- *         when the main one is rate limited or overloaded. Each model has its
- *         own limit, so these add capacity.
+ *         when the main one is rate limited, overloaded, or too slow. Each
+ *         model has its own limit, so these add capacity.
+ *     attemptTimeoutMs (number | undefined): How long one model gets before
+ *         the next is tried. Unset means no limit.
  */
 export interface GeminiOptions {
   apiKey: string;
   model: string;
   thinkingLevel?: string;
   fallbackModels?: string[];
+  attemptTimeoutMs?: number;
 }
 
 /**
@@ -73,13 +76,13 @@ export function createGeminiClient(options: GeminiOptions): LlmClient {
       // second failure move on to the next model.
       const res = await withFailover(
         [options.model, ...(options.fallbackModels ?? [])],
-        (model) =>
+        (model, signal) =>
           ai.models.generateContent({
             model,
             contents: req.contents as Content[],
-            config,
+            config: { ...config, abortSignal: signal },
           }),
-        { signal: req.signal, retries: 1 },
+        { signal: req.signal, retries: 1, attemptTimeoutMs: options.attemptTimeoutMs },
       );
 
       const content = (res.candidates?.[0]?.content ?? { role: "model", parts: [] }) as LlmContent;
