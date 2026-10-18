@@ -29,7 +29,7 @@ export interface ElevenLabsConfig {
   languageOf?: (personId: string) => Promise<string | null>;
   /** Fetch implementation, injectable for tests. */
   fetchImpl?: typeof fetch;
-  /** Request timeout in milliseconds. Defaults to 10000. */
+  /** Request timeout in milliseconds. Defaults to 30000. */
   timeoutMs?: number;
 }
 
@@ -85,7 +85,7 @@ export class ElevenLabsPlacer implements CallPlacer {
           dynamic_variables: { person_id: personId, caller_number: to, reason },
         },
       }),
-      signal: AbortSignal.timeout(this.config.timeoutMs ?? 10000),
+      signal: AbortSignal.timeout(this.config.timeoutMs ?? 30000),
     });
     if (!res.ok) {
       throw new Error(`elevenlabs outbound call failed: ${res.status} ${await res.text()}`);
