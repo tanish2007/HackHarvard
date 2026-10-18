@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { isDistress } from "./commands.js";
+import { isDistress, parseCommand } from "./commands.js";
 import type { CoreResponse, RelayEvent } from "./contracts.js";
 import { ACKNOWLEDGED, SOS_RECEIVED, handleText } from "./handler.js";
 import type { PeopleDirectory } from "./people.js";
@@ -23,6 +23,31 @@ export interface RelayDeps {
   log?: (msg: string) => void;
   /** Clock, injectable for tests. Defaults to the current time. */
   now?: () => Date;
+}
+
+/**
+ * Build the Contract A event for one incoming text.
+ *
+ * Args:
+ *     deps: The phone lookup and clock.
+ *     phone: The sender's phone number in E.164 format.
+ *     text: The message text.
+ *
+ * Returns:
+ *     RelayEvent: The event, with the sender's scenario location if they have one.
+ */
+function buildEvent(deps: RelayDeps, phone: string, text: string): RelayEvent {
+  const who = deps.directory.resolve(phone);
+  return {
+    event_id: `evt_${randomUUID()}`,
+    channel: "imessage",
+    person_id: who.person_id,
+    from: phone,
+    text,
+    location: who.location,
+    media_url: null,
+    timestamp: (deps.now?.() ?? new Date()).toISOString(),
+  };
 }
 
 /**
@@ -48,20 +73,14 @@ export async function processText(
   const reply = handleText(deps.registry, phone, text);
   if (reply !== null) {
     await send(reply);
+    // Core must hear about STOP too: it takes the person off the map and ends
+    // their check-in calls. It sends no reply, so its answer is ignored.
+    if (parseCommand(text) === "stop") await deps.postEvent(buildEvent(deps, phone, text));
     return;
   }
 
   const who = deps.directory.resolve(phone);
-  const event: RelayEvent = {
-    event_id: `evt_${randomUUID()}`,
-    channel: "imessage",
-    person_id: who.person_id,
-    from: phone,
-    text,
-    location: who.location,
-    media_url: null,
-    timestamp: (deps.now?.() ?? new Date()).toISOString(),
-  };
+  const event = buildEvent(deps, phone, text);
 
   // Start the Core call first, then acknowledge while it is in flight.
   const pending = deps.postEvent(event);
