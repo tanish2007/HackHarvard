@@ -8,6 +8,7 @@
 import type { CoreResponse, RelayAction, RelayEvent } from "../contracts.js";
 import { detectLanguage } from "../lang/detect.js";
 import { resolveLang } from "../lang/languages.js";
+import { handleKey } from "../lib/phone.js";
 import { classify } from "../rules/fastpath.js";
 import type { PersonStatus } from "../scenario/schema.js";
 import type { IncidentStore, TrackedPerson, TrackedUnit } from "../state/store.js";
@@ -139,11 +140,16 @@ export async function handleEvent(event: RelayEvent, deps: HandlerDeps): Promise
 function resolveSender(event: RelayEvent, deps: HandlerDeps): Sender {
   const { store } = deps;
   const unit = store.findUnitByHandle(event.from);
-  let person = unit ? undefined : (event.person_id ? store.getPerson(event.person_id) : undefined) ?? store.findPersonByHandle(event.from);
+  const isText = event.channel === "imessage" || event.channel === "sms";
+  let byId = event.person_id ? store.getPerson(event.person_id) : undefined;
+  // Text makes up ids like "p_<last 4 digits>" for unknown numbers, so two
+  // strangers can arrive with the same id. On text the number decides.
+  // Voice ids come from Core's own place_call, so they are trusted.
+  if (byId && isText && byId.handle && byId.handle !== handleKey(event.from)) byId = undefined;
+  let person = unit ? undefined : (byId ?? store.findPersonByHandle(event.from));
   let isNew = false;
   let rejoined = false;
 
-  const isText = event.channel === "imessage" || event.channel === "sms";
   const isStop = classify(event.text, event.channel, "").intent === "stop";
   if (!unit && !person && isText && !isStop) {
     person = store.restoreByHandle(event.from);
