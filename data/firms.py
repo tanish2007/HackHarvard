@@ -1,8 +1,9 @@
 """NASA FIRMS active fire detections.
 
-The area is the caller's lat, lng, and radius. An empty detection list is
-a successful response. A missing key or a bad payload raises DataSourceError
-so the caller can fall back.
+The area is the caller's lat, lng, and radius. The request is the last two
+days of NOAA-21. One day of Suomi NPP was empty while NOAA-21 still had
+detections. An empty detection list is a successful response. A missing key
+or a bad payload raises DataSourceError so the caller can fall back.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ from data import http
 from data.errors import DataSourceError
 from data.geo import haversine_km
 
-SOURCE = "VIIRS_SNPP_NRT"
+SOURCE = "VIIRS_NOAA21_NRT"
+DAY_RANGE = 2
 MAX_CLUSTERS = 8
 MIN_RADIUS_KM = 0.4
 
@@ -44,7 +46,7 @@ def fetch_fire_hazards(lat, lng, radius_km):
     area = f"{west:.4f},{south:.4f},{east:.4f},{north:.4f}"
     url = (
         "https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
-        f"{key}/{SOURCE}/{area}/1"
+        f"{key}/{SOURCE}/{area}/{DAY_RANGE}"
     )
     return hazards_from_csv(http.fetch_text(url), lat, lng, radius_km)
 

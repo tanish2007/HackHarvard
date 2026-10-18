@@ -9,7 +9,7 @@ from data.api import get_hazards, get_route, get_shelters, get_weather
 from data.errors import DataSourceError
 from data.geo import haversine_km
 from data.scenario import load_scenario
-from data.state import build_state
+from data.state import build_route, build_state, build_weather
 from data import http
 
 
@@ -61,6 +61,28 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(distances, sorted(distances))
         self.assertIn("capacity_note", rows[0])
         self.assertEqual(rows[0]["source"], "fake")
+
+    def test_route_for_the_map(self):
+        """The map route is Amit's line to the nearest scenario shelter."""
+        route = build_route()
+        self.assertEqual(
+            {"distance_km", "duration_min", "steps", "polyline", "avoided_hazards", "source"}
+            <= set(route),
+            True,
+        )
+        self.assertEqual(route["person_name"], "Amit")
+        self.assertEqual(route["shelter_name"], "Shelter C")
+        self.assertGreater(len(route["polyline"]), 1)
+        self.assertNotIn("route", build_state())
+
+    def test_forecast_for_the_map(self):
+        """The map forecast uses the incident center and the weather shape."""
+        forecast = build_weather()
+        self.assertEqual(
+            set(forecast),
+            {"summary", "wind_mph", "wind_dir", "temp_f", "next_2h", "source"},
+        )
+        self.assertEqual(forecast["source"], "fake")
 
     def test_weather_shape(self):
         """Weather returns the frozen forecast keys."""

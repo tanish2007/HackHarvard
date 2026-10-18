@@ -103,7 +103,7 @@ class LiveFixtureTests(unittest.TestCase):
             Raises:
                 DataSourceError: If the URL is not the FIRMS area call.
             """
-            if "firms.modaps.eosdis.nasa.gov" not in url or "VIIRS_SNPP_NRT" not in url:
+            if "firms.modaps.eosdis.nasa.gov" not in url or "VIIRS_NOAA21_NRT" not in url or not url.endswith("/2"):
                 raise DataSourceError(url)
             return csv_text
 
@@ -262,6 +262,36 @@ class LiveFixtureTests(unittest.TestCase):
         self.assertEqual(rows[0]["source"], "osm")
         self.assertLessEqual(rows[0]["distance_km"], rows[1]["distance_km"])
         self.assertEqual(rows[0]["name"], "Ocean Shelter")
+
+    def test_overpass_skips_unnamed_and_gazebos(self):
+        """Park shelters and blank pins are not evacuation shelters."""
+        payload = {
+            "elements": [
+                {
+                    "type": "node",
+                    "id": 1,
+                    "lat": 37.71,
+                    "lon": -122.44,
+                    "tags": {"amenity": "shelter"},
+                },
+                {
+                    "type": "node",
+                    "id": 2,
+                    "lat": 37.72,
+                    "lon": -122.44,
+                    "tags": {"name": "Pergola", "amenity": "shelter", "shelter_type": "gazebo"},
+                },
+                {
+                    "type": "node",
+                    "id": 3,
+                    "lat": 37.70,
+                    "lon": -122.44,
+                    "tags": {"name": "Hope", "social_facility": "shelter"},
+                },
+            ]
+        }
+        rows = shelters_from_overpass(payload, 37.71, -122.44)
+        self.assertEqual([row["name"] for row in rows], ["Hope"])
 
     def test_overpass_empty_raises(self):
         """No shelters is a failure so the scenario list can take over."""
