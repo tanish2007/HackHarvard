@@ -34,7 +34,7 @@ describe("Contract D values", () => {
 
   it("lists shelters in scenario order with distance from the incident center", () => {
     const { shelters } = makeStore().store.snapshot();
-    expect(shelters.map((s) => s.id)).toEqual(["sh_a", "sh_b", "sh_c"]);
+    expect(shelters.map((s) => s.id)).toEqual(["sh_a", "sh_b", "sh_c", "sh_hemenway"]);
     for (const s of shelters) {
       expect(s.distance_km).toBe(distanceKm(42.3744, -71.1169, s.lat, s.lng));
       expect(s.distance_km).toBeGreaterThan(0);

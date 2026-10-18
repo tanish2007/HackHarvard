@@ -39,7 +39,7 @@ describe("runOnce", () => {
     const { watcher, pushed, started } = setup();
     expect(await watcher.runOnce()).toEqual({ alerted: 2, person_ids: ["p_amit", "p_priya"], hazards: 1 });
     expect(pushed.map((a) => (a as SendTextAction).to)).toEqual([PHONES.amit, PHONES.priya]);
-    expect((pushed[0] as SendTextAction).text).toMatch(/Shelter/);
+    expect((pushed[0] as SendTextAction).text).toMatch(/Nearest shelter: Hemenway Gym/);
     expect(started).toEqual(["p_amit", "p_priya"]);
   });
 

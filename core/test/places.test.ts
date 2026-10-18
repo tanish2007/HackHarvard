@@ -33,7 +33,7 @@ describe("resolvePlace", () => {
     ["hwy 24", "Route 24"],
     ["Zone 3", "Zone 3"],
     ["Priya", "Priya"],
-    ["nearest shelter", "Shelter A"],
+    ["nearest shelter", "Hemenway Gym"],
     ["Mars", null],
     ["oak stadium", null],
   ])("resolves %j to %j", (query, expected) => {

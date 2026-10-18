@@ -43,7 +43,8 @@
   "shelters": [
     { "id": "sh_a", "name": "Shelter A", "lat": 42.3835, "lng": -71.1188, "capacity_note": "Gym, about 200 cots" },
     { "id": "sh_b", "name": "Shelter B", "lat": 42.3738, "lng": -71.1385, "capacity_note": "Pets allowed" },
-    { "id": "sh_c", "name": "Shelter C", "lat": 42.3708, "lng": -71.1018, "capacity_note": "Medical staff on site" }
+    { "id": "sh_c", "name": "Shelter C", "lat": 42.3708, "lng": -71.1018, "capacity_note": "Medical staff on site" },
+    { "id": "sh_hemenway", "name": "Hemenway Gym", "lat": 42.3778, "lng": -71.1186, "capacity_note": "Gym north of Harvard Yard, away from the fire" }
   ],
   "people": [
     {
