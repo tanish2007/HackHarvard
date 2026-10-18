@@ -107,7 +107,7 @@ class ContractTests(unittest.TestCase):
             )
 
     def test_real_mode_falls_back(self):
-        """A dead live source returns the fake with source fallback."""
+        """A dead live source falls back, except fires, which stay empty."""
         os.environ["DATA_MODE"] = "real"
         os.environ.pop("FIRMS_MAP_KEY", None)
 
@@ -138,8 +138,7 @@ class ContractTests(unittest.TestCase):
         finally:
             http.fetch_text = original_text
             http.fetch_json = original_json
-        self.assertTrue(rows)
-        self.assertTrue(all(row["source"] == "fallback" for row in rows))
+        self.assertEqual(rows, [])
         self.assertEqual(route["source"], "fallback")
         self.assertTrue(shelters)
         self.assertTrue(all(row["source"] == "fallback" for row in shelters))

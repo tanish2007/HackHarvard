@@ -18,13 +18,6 @@ const ZONE_STYLE = {
   watch: { color: "#7eb6ff", fillColor: "#7eb6ff", fillOpacity: 0.08, label: "Watch" },
 };
 
-const FROM_DEG = {
-  n: 0, north: 0, nne: 22.5, ne: 45, northeast: 45, ene: 67.5,
-  e: 90, east: 90, ese: 112.5, se: 135, southeast: 135, sse: 157.5,
-  s: 180, south: 180, ssw: 202.5, sw: 225, southwest: 225, wsw: 247.5,
-  w: 270, west: 270, wnw: 292.5, nw: 315, northwest: 315, nnw: 337.5,
-};
-
 const LANGUAGE_NAME = { en: "English", es: "Spanish", zh: "Chinese", gu: "Gujarati" };
 const CHANNEL_NAME = { imessage: "iMessage", sms: "SMS", voice: "Voice", radio: "Radio" };
 
@@ -39,7 +32,6 @@ let reports = null;
 let units = null;
 let volunteers = null;
 let zoneLayer = null;
-let windLayer = null;
 const hazardLayers = new Map();
 const shelterLayers = new Map();
 const peopleLayers = new Map();
@@ -58,6 +50,7 @@ let feedStick = true;
 let lastState = null;
 let statusFilter = "";
 let windowHours = 24;
+let liveFires = [];
 let inspector = null;
 let feedKey = "";
 let ignoreMapClick = false;
@@ -227,13 +220,23 @@ function isRouteShelter(shelter) {
   return !!(routeMeta && shelter && shelter.name && shelter.name === routeMeta.shelter_name);
 }
 
+function viewFor(lat, lng, zoom) {
+  const wide = window.innerWidth > 800;
+  const dx = wide ? 200 : 0;
+  const dy = wide ? 0 : -Math.round(window.innerHeight * 0.18);
+  if ((!dx && !dy) || !map) return L.latLng(lat, lng);
+  const projected = map.project([lat, lng], zoom);
+  return map.unproject(projected.subtract(L.point(dx, dy)), zoom);
+}
+
 function goTo(lat, lng, zoom) {
   const nextZoom = zoom || Math.max(map.getZoom(), 14);
+  const center = viewFor(lat, lng, nextZoom);
   if (reduceMotion()) {
-    map.setView([lat, lng], nextZoom);
+    map.setView(center, nextZoom, { animate: false });
     return;
   }
-  map.flyTo([lat, lng], nextZoom, { duration: 0.65 });
+  map.flyTo(center, nextZoom, { duration: 0.65 });
 }
 
 function holdMapClick() {
@@ -262,34 +265,40 @@ function zoneLevel(zone, fire) {
   return "watch";
 }
 
-function syncZones(hazardsRows) {
-  const fire = picture.fire || (hazardsRows || []).find((hazard) => hazard.kind === "fire");
-  if (!fire || fire.lat == null || fire.lng == null) {
-    perimeterKey = "";
-    zoneLayer.clearLayers();
-    return;
-  }
-  const key = fire.lat + "," + fire.lng + "," + fire.radius_km;
-  if (key === perimeterKey && zoneLayer.getLayers().length) return;
+function firmsFires(rows) {
+  return (rows || []).filter((hazard) => hazard && hazard.kind === "fire" && hazard.source === "firms");
+}
+
+function drawnHazards(state) {
+  const weather = (state.hazards || []).filter((hazard) => hazard.kind !== "fire" && hazardInWindow(hazard));
+  return firmsFires(liveFires).filter(hazardInWindow).concat(weather);
+}
+
+function syncZones(fires) {
+  const rows = firmsFires(fires).filter((fire) => fire.lat != null && fire.lng != null);
+  const key = rows.map((fire) => [fire.id, fire.lat, fire.lng, fire.radius_km].join(",")).join("|");
+  if (key === perimeterKey) return;
   perimeterKey = key;
   zoneLayer.clearLayers();
-  const polygon = L.polygon(organicRing(fire.lat, fire.lng, fire.radius_km), {
-    pane: "zones",
-    color: "#ef4444",
-    weight: 2,
-    dashArray: "6, 6",
-    fillColor: "#dc2626",
-    fillOpacity: 0.12,
-    className: "evac-perimeter",
+  rows.forEach((fire) => {
+    const polygon = L.polygon(organicRing(fire.lat, fire.lng, fire.radius_km), {
+      pane: "zones",
+      color: "#ef4444",
+      weight: 2,
+      dashArray: "6, 6",
+      fillColor: "#dc2626",
+      fillOpacity: 0.12,
+      className: "evac-perimeter",
+    });
+    polygon.bindTooltip("FIRMS evacuation perimeter");
+    polygon.on("click", () => {
+      holdMapClick();
+      const bounds = polygon.getBounds();
+      if (reduceMotion()) map.fitBounds(bounds, { padding: [36, 36], animate: false });
+      else map.fitBounds(bounds, { padding: [36, 36], maxZoom: 14 });
+    });
+    polygon.addTo(zoneLayer);
   });
-  polygon.bindTooltip("Evacuation perimeter");
-  polygon.on("click", () => {
-    holdMapClick();
-    const bounds = polygon.getBounds();
-    if (reduceMotion()) map.fitBounds(bounds, { padding: [36, 36], animate: false });
-    else map.fitBounds(bounds, { padding: [36, 36], maxZoom: 14 });
-  });
-  polygon.addTo(zoneLayer);
 }
 
 function hazardInWindow(hazard) {
@@ -308,9 +317,8 @@ function render(state) {
   });
   lastState = state;
   const incidentName = state.incident && state.incident.name ? state.incident.name : "Incident";
-  document.getElementById("incident-name").textContent =
-    "RELAY // " + incidentName.toUpperCase() + " INCIDENT COMMAND";
-  document.title = "Relay // " + incidentName + " incident command";
+  document.getElementById("incident-name").textContent = incidentName;
+  document.title = incidentName + " - Relay";
   document.getElementById("updated").textContent = updatedPhrase(state.incident.updated_at);
   const counts = state.counts || {};
   const roster = (Number(counts.safe) || 0)
@@ -331,7 +339,7 @@ function render(state) {
     rosterShare(counts.en_route, roster) + "% of active roster en route";
   document.querySelector(".count.sos").classList.toggle("is-hot", Number(counts.sos) > 0);
 
-  const visibleHazards = state.hazards.filter(hazardInWindow);
+  const visibleHazards = drawnHazards(state);
   syncHazards(visibleHazards);
   syncShelters(state.shelters);
   const visiblePeople = statusFilter
@@ -341,7 +349,7 @@ function render(state) {
   syncReports(state.reports);
   syncUnits(state.units);
   syncVolunteers(state.volunteers);
-  syncZones(visibleHazards);
+  syncZones(firmsFires(liveFires).filter(hazardInWindow));
   paintFeed(state);
   refreshInspector();
 
@@ -349,14 +357,15 @@ function render(state) {
     const bounds = [];
     state.people.forEach((person) => bounds.push([person.lat, person.lng]));
     state.shelters.forEach((shelter) => bounds.push([shelter.lat, shelter.lng]));
-    state.hazards.forEach((hazard) => bounds.push([hazard.lat, hazard.lng]));
+    visibleHazards.forEach((hazard) => bounds.push([hazard.lat, hazard.lng]));
     state.reports.forEach((report) => bounds.push([report.lat, report.lng]));
     state.volunteers.forEach((volunteer) => bounds.push([volunteer.lat, volunteer.lng]));
-    if (picture.fire) bounds.push([picture.fire.lat, picture.fire.lng]);
     if (bounds.length) {
+      const wide = window.innerWidth > 800;
       map.fitBounds(bounds, {
-        paddingTopLeft: [40, 40],
-        paddingBottomRight: [40, 96],
+        paddingTopLeft: [wide ? 440 : 28, wide ? 28 : 150],
+        paddingBottomRight: [36, wide ? 72 : Math.round(window.innerHeight * 0.48)],
+        animate: false,
       });
       fitted = true;
     }
@@ -369,13 +378,13 @@ function syncHazards(rows) {
   rows.forEach((hazard) => {
     const key = hazard.id;
     seen.add(key);
-    const color = hazard.kind === "fire" ? "#ff7a3c" : "#8eb7e8";
+    const color = hazard.kind === "fire" ? "#f97316" : "#1a73e8";
     const tooltip = statusLabel(hazard.kind) + ", " + hazard.severity;
     const existing = hazardLayers.get(key);
     if (existing) {
       existing.setLatLng([hazard.lat, hazard.lng]);
       existing.setRadius(hazard.radius_km * 1000);
-      existing.setStyle({ color: color, fillColor: color });
+      existing.setStyle({ color: color, fillColor: color, fillOpacity: 0.22 });
       existing.setTooltipContent(tooltip);
       return;
     }
@@ -384,7 +393,7 @@ function syncHazards(rows) {
       color: color,
       weight: 2,
       fillColor: color,
-      fillOpacity: 0.2,
+      fillOpacity: 0.22,
     }).bindTooltip(tooltip);
     layer.on("click", () => {
       holdMapClick();
@@ -395,6 +404,46 @@ function syncHazards(rows) {
     hazardLayers.set(key, layer);
   });
   dropMissing(hazardLayers, hazards, seen);
+}
+
+function pinSvg(color, selected, small) {
+  const size = small ? 18 : 28;
+  const center = size / 2;
+  const radius = small ? 7 : 11;
+  const inner = small ? 2.6 : 4.2;
+  const stroke = selected ? 2.6 : 2;
+  return "<svg width='" + size + "' height='" + size + "' viewBox='0 0 " + size + " " + size + "' aria-hidden='true'>"
+    + "<circle cx='" + center + "' cy='" + center + "' r='" + (radius + 1.5) + "' fill='rgba(60,64,67,0.22)'/>"
+    + "<circle cx='" + center + "' cy='" + center + "' r='" + radius + "' fill='" + color + "' stroke='#fff' stroke-width='" + stroke + "'/>"
+    + "<circle cx='" + center + "' cy='" + center + "' r='" + inner + "' fill='#fff'/></svg>";
+}
+
+function pinIcon(color, selected, options) {
+  const opts = options || {};
+  const small = !!opts.small;
+  const size = small ? 18 : 28;
+  const label = opts.label
+    ? "<span class='pin-label'>" + esc(opts.label) + "</span>"
+    : "";
+  const rings = opts.sos ? "<span class='ring'></span><span class='ring late'></span>" : "";
+  const cls = "gpin"
+    + (selected ? " is-selected" : "")
+    + (opts.sos ? " is-sos" : "")
+    + (small ? " is-small" : "");
+  return L.divIcon({
+    className: cls,
+    html: rings + "<span class='gpin-shape'>" + pinSvg(color, selected, small) + "</span>" + label,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+function paintMarker(layer, selected, icon, lift) {
+  if (layer.selectedFlag !== selected) {
+    layer.setIcon(icon);
+    layer.selectedFlag = selected;
+  }
+  if (layer.setZIndexOffset) layer.setZIndexOffset(lift || 0);
 }
 
 function syncShelters(rows) {
@@ -409,21 +458,21 @@ function syncShelters(rows) {
       }
       return;
     }
+    const selected = inspector && inspector.key === "shelter:" + key;
     const tooltip = shelter.name + ", " + shelter.capacity_note;
+    const icon = pinIcon("#22c55e", selected, { label: selected ? shelter.name : "" });
     const existing = shelterLayers.get(key);
     if (existing) {
       existing.setLatLng([shelter.lat, shelter.lng]);
       existing.setTooltipContent(tooltip);
+      paintMarker(existing, selected, icon, selected ? 500 : 0);
       return;
     }
-    const layer = L.circleMarker([shelter.lat, shelter.lng], {
+    const layer = L.marker([shelter.lat, shelter.lng], {
       pane: "residents",
-      radius: 6,
-      color: "#34d399",
-      weight: 2,
-      fillColor: "#059669",
-      fillOpacity: 0.95,
+      icon: icon,
     }).bindTooltip(tooltip);
+    layer.selectedFlag = selected;
     layer.on("click", () => {
       holdMapClick();
       openInspector(shelterModel(shelter), true);
@@ -449,22 +498,26 @@ function syncPeople(rows) {
     }
     const selected = inspector && inspector.key === "person:" + key;
     const tooltip = person.name + ", " + statusLabel(person.status);
+    const showLabel = selected || person.status === "sos";
+    const icon = pinIcon(STATUS_COLOR[person.status] || "#5f6368", selected, {
+      sos: person.status === "sos",
+      label: showLabel ? person.name : "",
+    });
     const existing = peopleLayers.get(key);
     if (existing && existing.statusName === person.status) {
       existing.setLatLng([person.lat, person.lng]);
       existing.setTooltipContent(tooltip);
-      if (person.status === "sos") {
-        existing.setIcon(sosIcon(selected));
-      } else {
-        existing.setStyle(personStyle(person, selected));
-      }
+      paintMarker(existing, selected, icon, person.status === "sos" ? 1000 : 0);
       return;
     }
     if (existing) people.removeLayer(existing);
-    const layer = person.status === "sos"
-      ? L.marker([person.lat, person.lng], { pane: "residents", icon: sosIcon(selected), zIndexOffset: 1000 })
-      : L.circleMarker([person.lat, person.lng], personStyle(person, selected));
+    const layer = L.marker([person.lat, person.lng], {
+      pane: "residents",
+      icon: icon,
+      zIndexOffset: person.status === "sos" ? 1000 : 0,
+    });
     layer.statusName = person.status;
+    layer.selectedFlag = selected;
     layer.bindTooltip(tooltip);
     layer.on("click", () => {
       holdMapClick();
@@ -477,46 +530,26 @@ function syncPeople(rows) {
   dropMissing(peopleLayers, people, seen);
 }
 
-function personStyle(person, selected) {
-  const color = STATUS_COLOR[person.status] || "#e8eef4";
-  return {
-    pane: "residents",
-    radius: 6,
-    color: selected ? "#e8eef4" : color,
-    weight: selected ? 3 : 1.5,
-    fillColor: color,
-    fillOpacity: 0.95,
-  };
-}
-
-function sosIcon(selected) {
-  return L.divIcon({
-    className: "sos-pin" + (selected ? " is-selected" : ""),
-    html: "<span class='ring'></span><span class='ring late'></span><span class='core'></span>",
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
-  });
-}
-
 function syncReports(rows) {
   const seen = new Set();
   rows.forEach((report) => {
     const key = report.id;
     seen.add(key);
+    const selected = inspector && inspector.key === "report:" + key;
     const tooltip = statusLabel(report.kind) + ", " + report.text;
+    const icon = pinIcon("#f97316", selected, { small: true, label: selected ? statusLabel(report.kind) : "" });
     const existing = reportLayers.get(key);
     if (existing) {
       existing.setLatLng([report.lat, report.lng]);
       existing.setTooltipContent(tooltip);
+      paintMarker(existing, selected, icon, selected ? 400 : 0);
       return;
     }
-    const layer = L.circleMarker([report.lat, report.lng], {
+    const layer = L.marker([report.lat, report.lng], {
       pane: "residents",
-      radius: 6,
-      color: "#e7c8a0",
-      fillColor: "#e7c8a0",
-      fillOpacity: 0.9,
+      icon: icon,
     }).bindTooltip(tooltip);
+    layer.selectedFlag = selected;
     layer.on("click", () => {
       holdMapClick();
       openInspector(reportModel(report), true);
@@ -534,19 +567,20 @@ function syncUnits(rows) {
     if (unit.lat == null || unit.lng == null) return;
     const key = unit.unit_id;
     seen.add(key);
+    const selected = inspector && inspector.key === "unit:" + key;
+    const icon = pinIcon("#5f6368", selected, { small: true, label: selected ? unit.name : "" });
     const existing = unitLayers.get(key);
     if (existing) {
       existing.setLatLng([unit.lat, unit.lng]);
       existing.setTooltipContent(unit.name);
+      paintMarker(existing, selected, icon, selected ? 400 : 0);
       return;
     }
-    const layer = L.circleMarker([unit.lat, unit.lng], {
+    const layer = L.marker([unit.lat, unit.lng], {
       pane: "residents",
-      radius: 6,
-      color: "#d5dde6",
-      fillColor: "#d5dde6",
-      fillOpacity: 0.9,
+      icon: icon,
     }).bindTooltip(unit.name);
+    layer.selectedFlag = selected;
     layer.on("click", () => {
       holdMapClick();
       openInspector(unitModel(unit), true);
@@ -565,17 +599,19 @@ function syncVolunteers(rows) {
     seen.add(key);
     const selected = inspector && inspector.key === "volunteer:" + key;
     const tooltip = volunteer.name + ", volunteer";
+    const icon = pinIcon("#5f6368", selected, { small: true, label: selected ? volunteer.name : "" });
     const existing = volunteerLayers.get(key);
     if (existing) {
       existing.setLatLng([volunteer.lat, volunteer.lng]);
       existing.setTooltipContent(tooltip);
-      existing.setIcon(volunteerIcon(selected));
+      paintMarker(existing, selected, icon, selected ? 400 : 0);
       return;
     }
     const layer = L.marker([volunteer.lat, volunteer.lng], {
       pane: "residents",
-      icon: volunteerIcon(selected),
+      icon: icon,
     }).bindTooltip(tooltip);
+    layer.selectedFlag = selected;
     layer.on("click", () => {
       holdMapClick();
       openInspector(volunteerModel(volunteer, lastState), true);
@@ -585,15 +621,6 @@ function syncVolunteers(rows) {
     volunteerLayers.set(key, layer);
   });
   dropMissing(volunteerLayers, volunteers, seen);
-}
-
-function volunteerIcon(selected) {
-  return L.divIcon({
-    className: "volunteer-pin" + (selected ? " is-selected" : ""),
-    html: "<span></span>",
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-  });
 }
 
 function dropMissing(store, group, seen) {
@@ -740,7 +767,7 @@ function locateTimeline(entry, state) {
   if (shelter) return shelter;
   const report = state.reports.find((row) => text && text.includes(String(row.text || "").toLowerCase()));
   if (report) return report;
-  const hazard = state.hazards.find((row) => text.includes(String(row.id).toLowerCase()));
+  const hazard = drawnHazards(state).find((row) => text.includes(String(row.id).toLowerCase()));
   if (hazard) return hazard;
   return null;
 }
@@ -763,7 +790,7 @@ function modelByKey(key, state) {
     return shelter ? shelterModel(shelter) : null;
   }
   if (kind === "hazard") {
-    const hazard = state.hazards.find((row) => row.id === id);
+    const hazard = drawnHazards(state).find((row) => row.id === id);
     return hazard ? hazardModel(hazard) : null;
   }
   if (kind === "report") {
@@ -832,7 +859,7 @@ function buildCards(state) {
       lng: spot ? spot.lng : null,
     });
   });
-  state.hazards.filter(hazardInWindow).forEach((hazard) => {
+  drawnHazards(state).forEach((hazard) => {
     cards.push({
       key: "hazard:" + hazard.id,
       kind: hazard.kind,
@@ -896,19 +923,6 @@ function buildCards(state) {
     return String(left.title || "").localeCompare(String(right.title || ""));
   });
   return cards;
-}
-
-function channelMeta(kind) {
-  const name = String(kind || "").toLowerCase();
-  if (name === "radio" || name === "voice" || name === "unit") {
-    return { id: "radio", label: "GMRS RADIO" };
-  }
-  if (name === "imessage" || name === "sms" || name === "sos" || name === "en_route" || name === "report") {
-    return { id: "sms", label: "SMS / iMSG" };
-  }
-  if (name === "fire") return { id: "firms", label: "FIRMS SATELLITE" };
-  if (name === "weather") return { id: "nws", label: "NWS" };
-  return { id: "system", label: "SYSTEM AUTO-CHECKIN" };
 }
 
 function senderFor(card) {
@@ -976,28 +990,41 @@ function paintFeed(state) {
   markFeedSelection();
 }
 
+function discKind(kind) {
+  const name = String(kind || "").toLowerCase();
+  if (name === "safe") return "safe";
+  if (name === "unconfirmed") return "unconfirmed";
+  if (name === "sos") return "sos";
+  if (name === "en_route" || name === "radio" || name === "voice" || name === "imessage" || name === "sms") {
+    return "en-route";
+  }
+  if (name === "fire" || name === "report") return "fire";
+  if (name === "weather") return "weather";
+  if (name === "shelter") return "shelter";
+  return "unit";
+}
+
 function feedItem(card) {
-  const meta = channelMeta(card.kind);
   const item = document.createElement("li");
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.key = card.key;
-  const top = document.createElement("span");
-  top.className = "log-top";
-  const time = document.createElement("time");
-  if (card.iso) time.dateTime = card.iso;
-  time.textContent = clock(card.iso);
-  const badge = document.createElement("span");
-  badge.className = "badge badge-" + meta.id;
-  badge.textContent = meta.label;
-  top.append(time, badge);
+  const disc = document.createElement("span");
+  disc.className = "log-disc log-disc-" + discKind(card.kind);
+  disc.setAttribute("aria-hidden", "true");
+  const main = document.createElement("span");
+  main.className = "log-main";
   const who = document.createElement("span");
   who.className = "log-who";
   who.textContent = senderFor(card);
   const text = document.createElement("span");
   text.className = "log-text";
-  text.textContent = "\u201C" + messageFor(card) + "\u201D";
-  button.append(top, who, text);
+  text.textContent = messageFor(card);
+  main.append(who, text);
+  const time = document.createElement("time");
+  if (card.iso) time.dateTime = card.iso;
+  time.textContent = card.time || clock(card.iso);
+  button.append(disc, main, time);
   button.addEventListener("click", () => {
     const model = modelByKey(card.key, lastState);
     if (model) openInspector(model, true);
@@ -1177,173 +1204,29 @@ function closeDrawer() {
   }
 }
 
-function travelBearing(direction) {
-  const from = FROM_DEG[String(direction || "").trim().toLowerCase()];
-  if (from == null) return null;
-  return (from + 180) * Math.PI / 180;
-}
-
-function createWindLayer() {
-  return L.Layer.extend({
-    onAdd(target) {
-      this._map = target;
-      this._canvas = L.DomUtil.create("canvas", "wind-canvas");
-      this._canvas.setAttribute("aria-hidden", "true");
-      target.getPane("wind").appendChild(this._canvas);
-      this._particles = [];
-      this._wind = null;
-      this._reduce = false;
-      this._shift = () => {
-        L.DomUtil.setPosition(this._canvas, this._map.containerPointToLayerPoint([0, 0]));
-      };
-      target.on("move", this._shift, this);
-      target.on("zoomend resize", this._place, this);
-      this._place();
-      this._frame = (now) => {
-        this._draw(now);
-        this._raf = requestAnimationFrame(this._frame);
-      };
-    },
-    onRemove(target) {
-      cancelAnimationFrame(this._raf);
-      target.off("move", this._shift, this);
-      target.off("zoomend resize", this._place, this);
-      this._canvas.remove();
-    },
-    setWind(wind, reduce) {
-      this._wind = wind;
-      this._reduce = reduce;
-      this._particles = [];
-      this._last = 0;
-      if (!this._map) return;
-      this._place();
-      cancelAnimationFrame(this._raf);
-      if (reduce) {
-        this._draw(0);
-        return;
-      }
-      this._raf = requestAnimationFrame(this._frame);
-    },
-    _place() {
-      const size = this._map.getSize();
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
-      this._canvas.width = Math.max(1, size.x) * ratio;
-      this._canvas.height = Math.max(1, size.y) * ratio;
-      this._canvas.style.width = size.x + "px";
-      this._canvas.style.height = size.y + "px";
-      L.DomUtil.setPosition(this._canvas, this._map.containerPointToLayerPoint([0, 0]));
-      this._ratio = ratio;
-      if (!this._particles.length) this._seed();
-    },
-    _seed() {
-      const bounds = this._map.getBounds();
-      const count = this._reduce ? 36 : 80;
-      this._particles = [];
-      for (let index = 0; index < count; index += 1) {
-        this._particles.push(this._spawn(bounds, Math.random()));
-      }
-    },
-    _spawn(bounds, age) {
-      return {
-        lat: bounds.getSouth() + Math.random() * (bounds.getNorth() - bounds.getSouth()),
-        lng: bounds.getWest() + Math.random() * (bounds.getEast() - bounds.getWest()),
-        age: age,
-      };
-    },
-    _draw(now) {
-      if (!this._canvas || !this._wind) return;
-      const bearing = travelBearing(this._wind.wind_dir);
-      if (bearing == null) return;
-      const ctx = this._canvas.getContext("2d");
-      const ratio = this._ratio || 1;
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
-      const dt = this._last ? Math.min(0.05, (now - this._last) / 1000) : 0.016;
-      this._last = now;
-      const bounds = this._map.getBounds();
-      const visual = this._reduce ? 0 : 28;
-      ctx.strokeStyle = "rgba(232, 238, 244, 0.55)";
-      ctx.lineWidth = 1.15;
-      if (this._reduce) {
-        this._particles.forEach((particle) => this._stroke(ctx, particle, bearing));
-        return;
-      }
-      this._particles.forEach((particle) => {
-        const start = this._map.latLngToContainerPoint([particle.lat, particle.lng]);
-        if (!this._reduce) {
-          const meters = Number(this._wind.wind_mph) * 0.44704;
-          const degLat = (meters / 111320) * visual * dt;
-          const degLng = degLat / Math.max(0.2, Math.cos(particle.lat * Math.PI / 180));
-          particle.lat += Math.cos(bearing) * degLat;
-          particle.lng += Math.sin(bearing) * degLng;
-          particle.age += dt * 0.35;
-          if (particle.age > 1 || !bounds.contains([particle.lat, particle.lng])) {
-            const next = this._spawn(bounds, 0);
-            particle.lat = next.lat;
-            particle.lng = next.lng;
-            particle.age = 0;
-          }
-        }
-        const end = this._map.latLngToContainerPoint([particle.lat, particle.lng]);
-        const dx = Math.sin(bearing);
-        const dy = -Math.cos(bearing);
-        ctx.beginPath();
-        ctx.moveTo(start.x - dx * 10, start.y - dy * 10);
-        ctx.lineTo(end.x, end.y);
-        ctx.stroke();
-      });
-    },
-    _stroke(ctx, particle, bearing) {
-      const start = this._map.latLngToContainerPoint([particle.lat, particle.lng]);
-      const dx = Math.sin(bearing) * 14;
-      const dy = -Math.cos(bearing) * 14;
-      ctx.beginPath();
-      ctx.moveTo(start.x - dx, start.y - dy);
-      ctx.lineTo(start.x + dx, start.y + dy);
-      ctx.stroke();
-    },
-  });
-}
-
-function applyWind() {
-  if (!map) return;
-  const bearing = picture.wind ? travelBearing(picture.wind.wind_dir) : null;
-  if (!picture.wind || !picture.wind.wind_mph || bearing == null) {
-    if (windLayer) {
-      map.removeLayer(windLayer);
-      windLayer = null;
-    }
-    return;
-  }
-  if (!windLayer) {
-    const Wind = createWindLayer();
-    windLayer = new Wind();
-    windLayer.addTo(map);
-  }
-  windLayer.setWind(picture.wind, reduceMotion());
+function closeLayers() {
+  const menu = document.getElementById("layers-menu");
+  const toggle = document.getElementById("layers-toggle");
+  if (!menu || !toggle) return;
+  menu.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
 }
 
 function setBasemap(name) {
   activeBasemap = name;
   if (tiles) map.removeLayer(tiles);
-  tiles = name === "sat" ? satelliteTiles() : darkTiles();
+  tiles = name === "sat" ? satelliteTiles() : streetTiles();
   tiles.addTo(map);
   document.getElementById("basemap-dark").setAttribute("aria-pressed", name === "dark" ? "true" : "false");
   document.getElementById("basemap-sat").setAttribute("aria-pressed", name === "sat" ? "true" : "false");
+  closeLayers();
 }
 
-function darkTiles() {
-  const attribution = "Tiles &copy; Esri";
-  return L.layerGroup([
-    L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 16, attribution: attribution },
-    ),
-    L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 16, attribution: attribution },
-    ),
-  ]);
+function streetTiles() {
+  return L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Tiles &copy; Esri" },
+  );
 }
 
 function satelliteTiles() {
@@ -1376,7 +1259,14 @@ function bindChrome() {
   });
   document.getElementById("basemap-dark").addEventListener("click", () => setBasemap("dark"));
   document.getElementById("basemap-sat").addEventListener("click", () => setBasemap("sat"));
+  document.getElementById("layers-toggle").addEventListener("click", () => {
+    const menu = document.getElementById("layers-menu");
+    const open = menu.hidden;
+    menu.hidden = !open;
+    document.getElementById("layers-toggle").setAttribute("aria-expanded", open ? "true" : "false");
+  });
   document.getElementById("drawer-close").addEventListener("click", () => closeDrawer());
+  document.getElementById("drawer-back").addEventListener("click", () => closeDrawer());
   const nameInput = document.getElementById("confirmed-by");
   nameInput.value = sessionStorage.getItem(NAME_KEY) || "";
   nameInput.addEventListener("input", () => {
@@ -1416,12 +1306,9 @@ async function fetchPicture() {
 
 function initMap() {
   map = L.map("map", { zoomControl: false });
-  L.control.zoom({ position: "topright" }).addTo(map);
+  L.control.zoom({ position: "bottomright" }).addTo(map);
   map.createPane("zones");
   map.getPane("zones").style.zIndex = 350;
-  map.createPane("wind");
-  map.getPane("wind").style.zIndex = 420;
-  map.getPane("wind").style.pointerEvents = "none";
   map.createPane("residents");
   map.getPane("residents").style.zIndex = 640;
   map.createPane("hud");
@@ -1437,10 +1324,10 @@ function initMap() {
   volunteers = L.layerGroup().addTo(map);
   zoneLayer = L.layerGroup().addTo(map);
   map.on("click", () => {
+    closeLayers();
     if (ignoreMapClick) return;
     closeDrawer();
   });
-  applyWind();
   paintWind();
 }
 
@@ -1483,7 +1370,12 @@ function overlapLabel(route) {
 }
 
 function routeChipText(route) {
-  return route.duration_min + " min · " + milesLabel(route.distance_km) + " mi · " + overlapLabel(route);
+  return route.duration_min + " min · " + milesLabel(route.distance_km) + " mi";
+}
+
+function routeTooltip(route) {
+  const overlap = overlapLabel(route);
+  return overlap ? routeChipText(route) + ", " + overlap : routeChipText(route);
 }
 
 function capacityPhrase(name) {
@@ -1498,24 +1390,22 @@ function capacityPhrase(name) {
 function originIcon(name) {
   return L.divIcon({
     className: "origin-pin",
-    html: "<span class='aura'></span><span class='aura late'></span><span class='core'></span>"
-      + "<span class='pin-label'>" + esc(name) + " (Current Location)</span>",
-    iconSize: [240, 32],
-    iconAnchor: [16, 16],
+    html: "<span class='accuracy'></span><span class='dot'></span>"
+      + "<span class='pin-label'>" + esc(name) + ", current location</span>",
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
   });
 }
 
 function shelterIcon(name) {
   const cap = capacityPhrase(name);
-  const mark = "<svg viewBox='0 0 24 24' width='14' height='14' aria-hidden='true'>"
-    + "<path fill='currentColor' d='M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z'/></svg>";
-  const capHtml = "<em>" + esc(cap || "Shelter") + "</em>";
   return L.divIcon({
     className: "shelter-pin",
-    html: "<span class='pill'><span class='mark'>" + mark + "</span><span><strong>"
-      + esc(name || "Shelter") + "</strong>" + capHtml + "</span></span>",
-    iconSize: [250, 40],
-    iconAnchor: [16, 20],
+    html: "<span class='gpin-shape'>" + pinSvg("#22c55e", false, false) + "</span>"
+      + "<span class='pill'><strong>" + esc(name || "Shelter") + "</strong><em>"
+      + esc(cap || "Shelter") + "</em></span>",
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
   });
 }
 
@@ -1523,8 +1413,8 @@ function chipIcon(text) {
   return L.divIcon({
     className: "route-hud",
     html: "<span class='chip'>" + esc(text) + "</span>",
-    iconSize: [360, 24],
-    iconAnchor: [180, 58],
+    iconSize: [160, 28],
+    iconAnchor: [80, 42],
   });
 }
 
@@ -1549,28 +1439,31 @@ function syncRoutePeople() {
 
 function drawRoute(route, line) {
   const label = routeChipText(route);
+  const tip = routeTooltip(route);
   document.getElementById("route-note").textContent =
     (route.person_name || "Resident") + " to " + (route.shelter_name || "shelter")
     + ", " + route.duration_min + " min";
   if (!routeGlow) {
     routeGlow = L.polyline(line, {
-      color: "#38bdf8",
-      weight: 8,
-      opacity: 0.25,
+      color: "#ffffff",
+      weight: 10,
+      opacity: 1,
       interactive: false,
     }).addTo(map);
   } else {
     routeGlow.setLatLngs(line);
+    routeGlow.setStyle({ color: "#ffffff", weight: 10, opacity: 1 });
   }
   if (!routeLine) {
     routeLine = L.polyline(line, {
-      color: "#f8fafc",
-      weight: 4,
-      opacity: 0.95,
-    }).bindTooltip(label).addTo(map);
+      color: "#1a73e8",
+      weight: 6,
+      opacity: 1,
+    }).bindTooltip(tip).addTo(map);
   } else {
     routeLine.setLatLngs(line);
-    routeLine.setTooltipContent(label);
+    routeLine.setStyle({ color: "#1a73e8", weight: 6, opacity: 1 });
+    routeLine.setTooltipContent(tip);
   }
   const start = line[0];
   const end = line[line.length - 1];
@@ -1653,9 +1546,26 @@ async function loadRoute() {
   }
 }
 
+async function loadLiveFires() {
+  const center = picture.fire;
+  if (!center || center.lat == null || center.lng == null) return;
+  try {
+    const rows = await fetch(
+      "/hazards?lat=" + encodeURIComponent(center.lat)
+        + "&lng=" + encodeURIComponent(center.lng)
+        + "&radius_km=50",
+      { cache: "no-store" }
+    ).then(readJson);
+    liveFires = Array.isArray(rows) ? firmsFires(rows) : [];
+  } catch (err) {
+    return;
+  }
+}
+
 async function tick() {
   loadForecast();
   loadRoute();
+  await loadLiveFires();
   try {
     const response = await fetch(stateUrl, { cache: "no-store" });
     render(await readJson(response));
@@ -1702,9 +1612,12 @@ async function boot() {
   setInterval(async () => {
     try {
       await fetchPicture();
-      applyWind();
       paintWind();
-      if (lastState) syncZones(lastState.hazards.filter(hazardInWindow));
+      await loadLiveFires();
+      if (lastState) {
+        syncHazards(drawnHazards(lastState));
+        syncZones(firmsFires(liveFires).filter(hazardInWindow));
+      }
       refreshInspector();
     } catch (err) {
       paintWind();
