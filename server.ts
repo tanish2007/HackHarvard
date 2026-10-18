@@ -56,6 +56,8 @@ if (process.env.GEMINI_API_KEY) {
     model,
     thinkingLevel: process.env.GEMINI_THINKING_LEVEL || undefined,
     fallbackModels,
+    // One model gets this long before the next is tried. 0 turns the limit off.
+    attemptTimeoutMs: Number(process.env.GEMINI_ATTEMPT_TIMEOUT_MS ?? 4000) || undefined,
   });
   agent = createAgent({ store, data, llm, log: process.env.RELAY_DEBUG ? console.log : undefined });
   console.log(`[core] agent on: Gemini ${model}${fallbackModels.length ? `, then ${fallbackModels.join(", ")}` : ""}`);
