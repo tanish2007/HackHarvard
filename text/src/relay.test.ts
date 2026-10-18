@@ -55,11 +55,40 @@ test("the first text signs up and does not go to Core", async () => {
   assert.equal(events.length, 0);
 });
 
-test("STOP is answered here and does not go to Core", async () => {
+test("STOP is answered here, and Core is told as well", async () => {
   const { deps, events } = makeDeps({ actions: [] });
   await run(deps, AMIT, "hello");
   assert.deepEqual(await run(deps, AMIT, "STOP"), [GOODBYE]);
-  assert.equal(events.length, 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.text, "STOP");
+  assert.equal(events[0]!.person_id, "p_amit");
+  assert.equal(events[0]!.from, AMIT);
+});
+
+test("the goodbye is sent before Core hears about STOP", async () => {
+  const order: string[] = [];
+  const { deps } = makeDeps({ actions: [] }, async () => {
+    order.push("core");
+    return { actions: [] };
+  });
+  await run(deps, AMIT, "hello");
+  await processText(deps, AMIT, "STOP", async () => {
+    order.push("goodbye");
+  });
+  assert.deepEqual(order, ["goodbye", "core"]);
+});
+
+test("STOP still gets its goodbye when Core is down, and Core's answer is ignored", async () => {
+  const send_text = { ...SEND_AMIT, text: "should never be sent" };
+  const { deps } = makeDeps({ actions: [send_text] });
+  await run(deps, AMIT, "hello");
+  assert.deepEqual(await run(deps, AMIT, "STOP"), [GOODBYE]);
+});
+
+test("STOP from someone who never texted is also passed to Core", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  assert.deepEqual(await run(deps, AMIT, "stop"), [GOODBYE]);
+  assert.equal(events.length, 1);
 });
 
 test("free text goes to Core as a full Contract A event", async () => {
@@ -158,7 +187,7 @@ test("SOS from someone who sent STOP still goes to Core and does not sign them b
   await run(deps, AMIT, "hello");
   await run(deps, AMIT, "STOP");
   assert.deepEqual(await run(deps, AMIT, "I need help"), [SOS_RECEIVED]);
-  assert.equal(events.length, 1);
+  assert.deepEqual(events.map((e) => e.text), ["STOP", "I need help"]);
   assert.equal(deps.registry.status(AMIT), "opted_out");
 });
 
