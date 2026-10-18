@@ -68,6 +68,16 @@ describe("POST /escalations/:person_id/confirm", () => {
     expect(pushed).toEqual([]);
   });
 
+  it("needs the admin token when one is set", async () => {
+    const { app, store, pushed } = fullApp({ adminToken: "demo-token" });
+    store.setStatus("p_amit", "sos");
+    const denied = await request(app).post("/escalations/p_amit/confirm");
+    expect(denied.status).toBe(403);
+    expect(denied.headers["access-control-allow-origin"]).toBe("*");
+    expect(pushed).toEqual([]);
+    expect((await request(app).post("/escalations/p_amit/confirm").set("x-relay-admin", "demo-token")).status).toBe(200);
+  });
+
   it("answers 503 when escalation is off", async () => {
     expect((await request(fullApp({ bare: true }).app).post("/escalations/p_amit/confirm")).status).toBe(503);
   });

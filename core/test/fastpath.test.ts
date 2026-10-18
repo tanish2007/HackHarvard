@@ -160,6 +160,16 @@ describe("negation and questions", () => {
     expect(intent("there is no road out and my son is hurt")).toBe("sos");
   });
 
+  it("treats a leading no as an answer, not a negation", () => {
+    expect(intent("no I need help", "voice")).toBe("sos");
+    expect(intent("no we're trapped")).toBe("sos");
+  });
+
+  it.each(["no I'm not hurt", "no one is hurt"])("%j is not sos", (text) => {
+    expect(intent(text)).not.toBe("sos");
+    expect(intent(text, "voice")).not.toBe("sos");
+  });
+
   it("does not carry a negation across a clause boundary", () => {
     expect(intent("No. I'm trapped")).toBe("sos");
     expect(intent("not good, we're trapped")).toBe("sos");

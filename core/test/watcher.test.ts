@@ -87,6 +87,47 @@ describe("runOnce", () => {
   });
 });
 
+describe("alert details", () => {
+  it("sends Priya her fire alert in Gujarati", async () => {
+    const { watcher, pushed } = setup();
+    await watcher.runOnce();
+    const alert = pushed.find((a) => "person_id" in a && a.person_id === "p_priya");
+    expect(alert && "text" in alert ? alert.text : "").toMatch(/\p{Script=Gujarati}/u);
+  });
+});
+
+describe("the same fire with a new id", () => {
+  /**
+   * A watcher whose data returns whatever single fire the test sets.
+   *
+   * Returns:
+   *     The watcher and a function to move the fire, with a new id.
+   */
+  function movingFire() {
+    let fire = { id: "f1", lat: 37.872, lng: -122.205 };
+    const { watcher } = setup({
+      async getHazards() {
+        return [{ ...fire, kind: "fire" as const, radius_km: 1.2, severity: "high", source: "firms", updated_at: "" }];
+      },
+    });
+    return { watcher, move: (id: string, dLat: number) => (fire = { id, lat: 37.872 + dLat, lng: -122.205 }) };
+  }
+
+  it("does not re-alert for a new id less than 1 km away", async () => {
+    const { watcher, move } = movingFire();
+    expect((await watcher.runOnce()).alerted).toBe(2);
+    move("f2", 0.005); // about 0.56 km north
+    expect((await watcher.runOnce()).alerted).toBe(0);
+  });
+
+  it("alerts again for a fire more than 1 km away", async () => {
+    const { watcher, move } = movingFire();
+    await watcher.runOnce();
+    move("f3", -0.015); // about 1.7 km south, closer to the residents
+    expect((await watcher.runOnce()).alerted).toBe(2);
+  });
+});
+
 describe("polling", () => {
   it("runs now, then every hazard_poll_sec, until stopped", async () => {
     let runs = 0;

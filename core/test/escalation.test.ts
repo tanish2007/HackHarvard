@@ -127,6 +127,14 @@ describe("confirm", () => {
     expect(await engine.confirm("p_amit")).toEqual({ ok: false, error: "already_confirmed" });
   });
 
+  it("lets the responder retry when the emergency call was not delivered", async () => {
+    const { store, engine } = setup(false);
+    store.setStatus("p_amit", "sos");
+    const first = await engine.confirm("p_amit");
+    expect(first.ok && first.results.every((r) => r.ok)).toBe(false);
+    expect((await engine.confirm("p_amit")).ok).toBe(true);
+  });
+
   it("refuses someone who is not in SOS, or unknown", async () => {
     const { engine } = setup();
     expect(await engine.confirm("p_amit")).toEqual({ ok: false, error: "not_sos" });
