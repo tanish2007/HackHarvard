@@ -78,10 +78,15 @@ interface Sender {
 }
 
 /**
- * Longest Core waits for the agent before falling back. Voice gives up on
- * /event after 4s, so this leaves time for the rest of the request.
+ * Longest Core waits for the agent before falling back.
+ *
+ * The default is 3200 ms, which leaves time inside Voice's 4 s default wait on
+ * /event. The Gemini agent can take longer than that when the model is slow,
+ * so set AGENT_TIMEOUT_MS in .env to wait longer. Raise Voice's
+ * VOICE_CORE_TIMEOUT_MS above it, so Voice does not give up first. Voice says
+ * "One moment" on a call while it waits.
  */
-export const AGENT_TIMEOUT_MS = 3200;
+export const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS) || 3200;
 
 /** Events still being handled, per store, so a redelivery waits for them. */
 const inFlight = new WeakMap<IncidentStore, Map<string, Promise<CoreResponse>>>();
