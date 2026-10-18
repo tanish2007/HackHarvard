@@ -1,11 +1,65 @@
 /**
- * Shapes Core hands to other lanes.
+ * Shapes Core shares with other lanes.
  *
- * Contract D is the GET /state body the dashboard polls every two seconds.
- * Do not rename fields here without agreeing it in the group chat and
+ * Contract A is what channels POST to /event. Contract B is what Core sends
+ * back. Contract D is the GET /state body the dashboard polls every two
+ * seconds. Do not rename fields here without agreeing it in the group chat and
  * updating the PRD first.
  */
 import type { PersonStatus } from "./scenario/schema.js";
+
+/** Channels a Contract A event can come from. */
+export type Channel = "imessage" | "sms" | "voice" | "radio";
+
+/** Contract A: an event handed from a channel to Core. */
+export interface RelayEvent {
+  event_id: string;
+  channel: Channel;
+  /** Proposed: may be null, and Core resolves the person from `from`. */
+  person_id: string | null;
+  from: string;
+  text: string;
+  location: { lat: number; lng: number } | null;
+  media_url: string | null;
+  timestamp: string;
+}
+
+/**
+ * Contract B: send a text to a person.
+ *
+ * `to` is a proposed addition: the person's handle, so Text can reach people
+ * who signed up through Core and are not in scenario.json.
+ */
+export interface SendTextAction {
+  type: "send_text";
+  person_id: string;
+  to: string | null;
+  text: string;
+  map_url: string | null;
+}
+
+/** Contract B: place an outbound call. `to` as in SendTextAction. */
+export interface PlaceCallAction {
+  type: "place_call";
+  person_id: string;
+  to: string | null;
+  script: string;
+  reason: string;
+}
+
+/** Contract B: speak on the call that is already open. */
+export interface SayAction {
+  type: "say";
+  text: string;
+}
+
+/** Any action Core can return. */
+export type RelayAction = SendTextAction | PlaceCallAction | SayAction;
+
+/** Contract B: the response body from /event, and what Core pushes. */
+export interface CoreResponse {
+  actions: RelayAction[];
+}
 
 /** Contract C hazard shape, reused as-is in /state. */
 export interface Hazard {
