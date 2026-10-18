@@ -308,6 +308,7 @@ function render(state) {
 
   const visibleHazards = drawnHazards(state);
   syncSpread(visibleHazards);
+  paintLiveFires(visibleHazards);
   syncHazards(visibleHazards);
   syncShelters(state.shelters);
   const visiblePeople = statusFilter
@@ -322,13 +323,16 @@ function render(state) {
   paintFeed(state);
   refreshInspector();
 
-  const fireOn = visibleHazards.length > 0;
+  // Live NASA fires are shown but are not the demo fire: they do not flip
+  // the fire button or pull the view away from the incident.
+  const incidentFires = visibleHazards.filter((hazard) => !isLiveFire(hazard));
+  const fireOn = incidentFires.length > 0;
   const fireButton = document.getElementById("fire-toggle");
   fireButton.textContent = fireOn ? "Turn fire off" : "Turn fire on";
   fireButton.classList.toggle("is-on", fireOn);
   fireButton.setAttribute("aria-pressed", fireOn ? "true" : "false");
 
-  const bounds = collectBounds(state, visibleHazards);
+  const bounds = collectBounds(state, incidentFires);
   const key = bounds.map((point) => point[0].toFixed(4) + "," + point[1].toFixed(4)).join("|");
   if (key && key !== fitKey) {
     const wide = window.innerWidth > 800;
@@ -424,6 +428,17 @@ function syncAssignments(state) {
 }
 
 const SPREAD_FILL = [0.14, 0.09, 0.05, 0.03];
+// Staged demo fire in orange, live NASA FIRMS fires in red.
+const DEMO_FIRE_COLOR = "#f97316";
+const LIVE_FIRE_COLOR = "#dc2626";
+
+function isLiveFire(hazard) {
+  return !!hazard && hazard.source === "firms";
+}
+
+function fireColor(hazard) {
+  return isLiveFire(hazard) ? LIVE_FIRE_COLOR : DEMO_FIRE_COLOR;
+}
 
 function compassWord(deg) {
   const words = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
@@ -441,13 +456,15 @@ function syncSpread(rows) {
       const key = hazard.id + ":" + step.minutes;
       seen.add(key);
       const latlngs = step.polygon.map((point) => [point.lat, point.lng]);
-      const tooltip = "Projected fire edge in " + step.minutes + " min (model estimate), spreading "
+      const tooltip = (isLiveFire(hazard) ? "Live NASA fire. " : "")
+        + "Projected fire edge in " + step.minutes + " min (model estimate), spreading "
         + compassWord(hazard.spread.head_direction_deg);
+      const color = fireColor(hazard);
       const style = {
-        color: "#f97316",
+        color: color,
         weight: index === 0 ? 2 : 1.5,
         dashArray: "6 6",
-        fillColor: "#f97316",
+        fillColor: color,
         fillOpacity: SPREAD_FILL[Math.min(index, SPREAD_FILL.length - 1)],
       };
       const existing = spreadLayers.get(key);
@@ -474,8 +491,8 @@ function syncHazards(rows) {
   rows.forEach((hazard) => {
     const key = hazard.id;
     seen.add(key);
-    const color = hazard.kind === "fire" ? "#f97316" : "#1a73e8";
-    const tooltip = statusLabel(hazard.kind) + ", " + hazard.severity;
+    const color = hazard.kind === "fire" ? fireColor(hazard) : "#1a73e8";
+    const tooltip = (isLiveFire(hazard) ? "Live NASA fire" + (hazard.area ? " (" + hazard.area + ")" : "") : statusLabel(hazard.kind)) + ", " + hazard.severity;
     const existing = hazardLayers.get(key);
     if (existing) {
       existing.setLatLng([hazard.lat, hazard.lng]);
@@ -799,7 +816,7 @@ function shelterModel(shelter) {
 function hazardModel(hazard) {
   return {
     key: "hazard:" + hazard.id,
-    title: statusLabel(hazard.kind),
+    title: isLiveFire(hazard) ? "Live NASA fire" + (hazard.area ? ", " + hazard.area : "") : statusLabel(hazard.kind),
     status: hazard.kind,
     lat: hazard.lat,
     lng: hazard.lng,
@@ -822,7 +839,7 @@ function spreadRows(spread) {
     ["Flame length", "About " + spread.flame_length_m + " m"],
     ["Fuel", spread.fuel_model + ", " + spread.fuel_name],
     ["Forecast", spread.forecast.map((step) => step.minutes + " min").join(", ") + " (Rothermel model estimate)"],
-  ];
+  ].concat(spread.note ? [["Note", spread.note]] : []);
 }
 
 function reportModel(report) {
@@ -1705,48 +1722,51 @@ async function resetDemo() {
   if (ok) await tick();
 }
 
-async function loadFirmsPanel() {
+// Fills the Live NASA FIRMS panel from Core's /state, which refreshes the
+// live fires itself every few minutes. Lists them nearest first, each with
+// a button that flies the map there. The incident view is not touched
+// unless someone presses one.
+let liveFiresKey = "";
+
+function paintLiveFires(hazards) {
   const center = picture.center;
   const countEl = document.getElementById("firms-count");
   const nearEl = document.getElementById("firms-nearest");
-  if (!center || center.lat == null || center.lng == null) {
-    countEl.textContent = "No venue yet";
+  const listEl = document.getElementById("firms-list");
+  const fires = (hazards || []).filter(isLiveFire);
+  const key = fires.map((fire) => fire.id + (fire.spread ? "+" : "")).join("|");
+  if (key === liveFiresKey) return;
+  liveFiresKey = key;
+  if (listEl) listEl.replaceChildren();
+  if (!fires.length) {
+    countEl.textContent = "No live fires right now";
     nearEl.textContent = "";
     return;
   }
-  try {
-    const rows = await fetch(
-      "/firms?lat=" + encodeURIComponent(center.lat)
-        + "&lng=" + encodeURIComponent(center.lng)
-        + "&radius_km=50",
-      { cache: "no-store" }
-    ).then(readJson);
-    const fires = Array.isArray(rows) ? rows.filter((row) => row && row.lat != null && row.lng != null) : [];
-    if (!fires.length) {
-      countEl.textContent = "No detections";
-      nearEl.textContent = "";
-      return;
-    }
-    let nearest = fires[0];
-    let best = haversine(center.lat, center.lng, nearest.lat, nearest.lng);
-    fires.forEach((fire) => {
-      const distance = haversine(center.lat, center.lng, fire.lat, fire.lng);
-      if (distance < best) {
-        best = distance;
-        nearest = fire;
-      }
+  const distance = (fire) => (center && center.lat != null ? haversine(center.lat, center.lng, fire.lat, fire.lng) : 0);
+  const sorted = fires.slice().sort((a, b) => distance(a) - distance(b));
+  countEl.textContent = fires.length + (fires.length === 1 ? " live fire" : " live fires") + ", last 2 days";
+  const nearestKm = distance(sorted[0]);
+  nearEl.textContent = nearestKm < 50 ? "Nearest " + nearestKm.toFixed(1) + " km from the venue" : "None within 50 km of the venue";
+  if (!listEl) return;
+  sorted.forEach((fire) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "firms-go";
+    const where = (fire.area ? fire.area + ", " : "") + Math.round(distance(fire)) + " km";
+    const spread = fire.spread ? ", spreading " + compassWord(fire.spread.head_direction_deg) : ", no wind data";
+    button.textContent = where + spread;
+    button.title = "Go to this fire";
+    button.addEventListener("click", () => {
+      openInspector(hazardModel(fire), true);
+      goTo(fire.lat, fire.lng, 12);
     });
-    countEl.textContent = fires.length + (fires.length === 1 ? " detection" : " detections");
-    nearEl.textContent = "Nearest " + best.toFixed(1) + " km from Harvard Yard";
-  } catch (err) {
-    countEl.textContent = "NASA did not answer";
-    nearEl.textContent = "";
-  }
+    listEl.append(button);
+  });
 }
 
 async function tick() {
   loadForecast();
-  loadFirmsPanel();
   try {
     const response = await fetch(stateUrl, { cache: "no-store" });
     render(await readJson(response));
@@ -1794,7 +1814,6 @@ async function boot() {
     try {
       await fetchPicture();
       paintWind();
-      await loadFirmsPanel();
       if (lastState) refreshInspector();
     } catch (err) {
       paintWind();
