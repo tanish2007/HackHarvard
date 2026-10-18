@@ -26,9 +26,22 @@ function scenarioDir(local?: unknown): string {
 }
 
 test("normalizePhone makes formats compare equal", () => {
-  assert.equal(normalizePhone("(617) 555-0101"), "+6175550101");
+  assert.equal(normalizePhone("(617) 555-0101"), "+16175550101");
   assert.equal(normalizePhone("+1 617 555 0101"), "+16175550101");
   assert.equal(normalizePhone(""), "");
+});
+
+test("normalizePhone keeps an iMessage email, in lowercase", () => {
+  assert.equal(normalizePhone(" Amit@Example.COM "), "amit@example.com");
+});
+
+test("an unknown email gets a made-up id from the part before the @", () => {
+  const directory = new PeopleDirectory([]);
+  assert.deepEqual(directory.resolve("Sam.Lee@example.com"), {
+    person_id: "p_samlee",
+    location: null,
+    known: false,
+  });
 });
 
 test("a scenario number resolves to its person and location", () => {

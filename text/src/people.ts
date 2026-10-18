@@ -27,17 +27,25 @@ export interface Resolved {
 }
 
 /**
- * Reduce a phone number to digits with a leading plus, so formats compare equal.
+ * Reduce a phone number or iMessage email to one comparable form.
+ *
+ * Follows the same rules as Core, so both sides agree on who someone is.
  *
  * Args:
- *     phone: A phone number in any common format.
+ *     phone: A phone number or email in any common format.
  *
  * Returns:
- *     string: For example "+14155550123".
+ *     string: E.164 for a phone number (a 10-digit US number gets +1), the
+ *         lowercase address for an email, or "" if there is nothing usable.
  */
 export function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  return digits ? `+${digits}` : "";
+  const trimmed = phone.trim();
+  if (trimmed.includes("@")) return trimmed.toLowerCase();
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return "";
+  if (trimmed.startsWith("+")) return `+${digits}`;
+  if (digits.length === 10) return `+1${digits}`;
+  return `+${digits}`;
 }
 
 /** Lookup of people by phone number. */
@@ -87,7 +95,12 @@ export class PeopleDirectory {
     const normalized = normalizePhone(phone);
     const person = this.byPhone.get(normalized);
     if (person) return { person_id: person.person_id, location: person.location, known: true };
-    return { person_id: `p_${normalized.slice(-4)}`, location: null, known: false };
+    // Not in the scenario: make up an id. An email has no digits to use, so it
+    // uses the part before the @.
+    const tail = normalized.includes("@")
+      ? normalized.split("@")[0]!.replace(/\W/g, "")
+      : normalized.slice(-4);
+    return { person_id: `p_${tail}`, location: null, known: false };
   }
 }
 
