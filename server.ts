@@ -48,9 +48,17 @@ const dispatcher = createHttpDispatcher({
 let agent: Agent | undefined;
 if (process.env.GEMINI_API_KEY) {
   const model = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
-  const llm = createGeminiClient({ apiKey: process.env.GEMINI_API_KEY, model, thinkingLevel: process.env.GEMINI_THINKING_LEVEL || undefined });
+  // Other models to try when the main one is rate limited or overloaded. Each
+  // model has its own limit, so these add capacity. Comma separated.
+  const fallbackModels = (process.env.GEMINI_FALLBACK_MODELS ?? "").split(",").map((m) => m.trim()).filter(Boolean);
+  const llm = createGeminiClient({
+    apiKey: process.env.GEMINI_API_KEY,
+    model,
+    thinkingLevel: process.env.GEMINI_THINKING_LEVEL || undefined,
+    fallbackModels,
+  });
   agent = createAgent({ store, data, llm, log: process.env.RELAY_DEBUG ? console.log : undefined });
-  console.log(`[core] agent on: Gemini ${model}`);
+  console.log(`[core] agent on: Gemini ${model}${fallbackModels.length ? `, then ${fallbackModels.join(", ")}` : ""}`);
 } else {
   console.warn("[core] agent off: set GEMINI_API_KEY in .env. Keyword rules still work.");
 }
