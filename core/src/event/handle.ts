@@ -6,6 +6,7 @@
  * anything itself. It only returns actions for the channels to carry out.
  */
 import type { CoreResponse, RelayAction, RelayEvent } from "../contracts.js";
+import type { Dispatcher } from "../dispatch/outbound.js";
 import { detectLanguage } from "../lang/detect.js";
 import { resolveLang } from "../lang/languages.js";
 import { handleKey } from "../lib/phone.js";
@@ -54,11 +55,17 @@ export type Agent = (ctx: AgentContext) => Promise<RelayAction[]>;
  *     escalation ({ contactReceived(personId: string): void } | undefined):
  *         Told whenever a person gets in touch, so their check-in chain
  *         stops. Without it, no chains run.
+ *     dispatcher (Pick<Dispatcher, "push"> | undefined): Pushes actions
+ *         for anyone other than the sender, e.g. the family text after an
+ *         SOS, straight to the lane that carries them out. A channel only
+ *         answers the person it is talking to, so those actions would be
+ *         lost in the reply. Without it, they stay in the reply.
  */
 export interface HandlerDeps {
   store: IncidentStore;
   agent?: Agent;
   escalation?: { contactReceived(personId: string): void };
+  dispatcher?: Pick<Dispatcher, "push">;
 }
 
 /** Who sent an event, after looking them up. */
@@ -107,9 +114,17 @@ export async function handleEvent(event: RelayEvent, deps: HandlerDeps): Promise
 
   const work = (async () => {
     const sender = resolveSender(event, deps);
-    const response = { actions: await route(event, sender, deps) };
+    const actions = await route(event, sender, deps);
+    logActions(deps.store, event, actions, sender);
+    const senderId = sender.person?.person_id ?? sender.unit?.unit_id;
+    const forOthers = deps.dispatcher ? actions.filter((a) => a.type !== "say" && a.person_id !== senderId) : [];
+    const response = { actions: actions.filter((a) => !forOthers.includes(a)) };
+    // Remembered before the push, so a redelivered event never pushes twice.
     deps.store.rememberResponse(key, response);
-    logActions(deps.store, event, response.actions, sender);
+    if (forOthers.length > 0) {
+      // Not awaited: the sender's reply must not wait on another lane.
+      deps.dispatcher!.push(forOthers).catch((err) => console.error(`[core] push failed for ${event.event_id}:`, err));
+    }
     return response;
   })();
   pending.set(key, work);
@@ -163,7 +178,7 @@ function resolveSender(event: RelayEvent, deps: HandlerDeps): Sender {
   if (unit) store.markUnitHeard(unit.unit_id);
   if (person) {
     // Switch language only when the message clearly is in another one, so
-    // even the welcome to a new Spanish texter is in Spanish.
+    // even the first reply to a new Spanish texter is in Spanish.
     const detected = event.channel === "radio" ? null : detectLanguage(event.text);
     if (detected && detected !== resolveLang(person.language)) store.setLanguage(person.person_id, detected);
     store.recordContact(person.person_id, event.location, event.text);
@@ -227,7 +242,9 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       if (!person) return [];
       store.removePerson(person.person_id);
       store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} opted out (STOP)` });
-      return [{ type: "send_text", person_id: person.person_id, to: person.handle, text: replies.stopped(incident, person.language), map_url: null }];
+      // No reply: Text owns STOP and already confirmed it. Core only takes
+      // them off the map, which also ends their check-in chain.
+      return [];
     }
 
     case "sos": {
@@ -259,8 +276,8 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
     }
 
     case "agent": {
-      if (sender.isNew) return [reply(replies.welcome(incident, event.location !== null, lang))];
-      if (sender.rejoined && person) return [reply(replies.welcomeBack(person.name, incident, lang))];
+      // No welcome here: Text owns sign-up and already welcomed them before
+      // forwarding anything, so this is a real question and gets an answer.
       if (person && event.location && !event.text.trim()) return [reply(replies.locationThanks(person.name, lang))];
       const channelKind = event.channel === "radio" ? "radio" : medium === "spoken" ? "voice" : "text";
       if (!deps.agent) return [reply(replies.fallback(incident, channelKind, lang))];
