@@ -47,7 +47,7 @@
       <span class="sheet-grab" aria-hidden="true"></span>
       <section class="feed" aria-label="Incident log and radio dispatch">
         <div class="feed-head">
-          <h2>Recent</h2>
+          <h2>Timeline</h2>
           <p class="feed-count"><span id="feed-count">0</span></p>
         </div>
         <ol id="feed"></ol>
@@ -74,7 +74,16 @@
       </aside>
     </div>
   </aside>
+  <aside id="firms-panel" aria-label="Live NASA FIRMS">
+    <h2>Live NASA FIRMS</h2>
+    <p id="firms-count">Checking NASA</p>
+    <p id="firms-nearest"></p>
+  </aside>
   <div class="map-tools">
+    <div class="demo-controls">
+      <button type="button" id="fire-toggle" aria-pressed="false">Turn fire on</button>
+      <button type="button" id="reset-demo">Reset demo</button>
+    </div>
     <div class="layers">
       <button type="button" id="layers-toggle" aria-expanded="false" aria-controls="layers-menu" aria-label="Map layers">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3 3 8.2 12 13.4 21 8.2 12 3zm0 12.2L4.2 10.4 3 11.1 12 16.3 21 11.1l-1.2-.7L12 15.2zm0 3.4-7.8-4.8L3 14.5 12 19.7 21 14.5l-1.2-.7L12 18.6z"/></svg>
@@ -85,16 +94,10 @@
       </div>
     </div>
     <div class="map-foot">
-      <label class="window" for="window">
-        Detections
-        <span id="window-label">24h</span>
-        <input id="window" type="range" min="1" max="48" value="24" aria-valuemin="1" aria-valuemax="48" aria-label="Detections 24h">
-      </label>
       <p id="wind-readout" class="weather-chip">Weather unavailable</p>
       <p class="legend" aria-label="Map legend">
-        <span><i class="swatch evacuate"></i>Evacuate now</span>
-        <span><i class="swatch warning"></i>Warning</span>
-        <span><i class="swatch safe"></i>Safe</span>
+        <span><i class="swatch fire"></i>Fire</span>
+        <span><i class="swatch blocked"></i>Road blocked</span>
         <span><i class="swatch shelter"></i>Shelter</span>
         <span><i class="route-swatch"></i>Route</span>
       </p>

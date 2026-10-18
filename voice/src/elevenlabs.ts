@@ -9,6 +9,16 @@ import type { CallPlacer } from "./ports.js";
 
 const OUTBOUND_PATH = "/v1/convai/sip-trunk/outbound-call";
 
+/**
+ * What every call says first when it runs in another language.
+ *
+ * Calls always open in English, so they are understood from the first second
+ * even if the language on file is wrong. The person can then answer in
+ * English or in their own language.
+ */
+export const ENGLISH_OPENING =
+  "This is Relay, calling to check on you. You can answer in English or in your own language.";
+
 /** Settings for {@link ElevenLabsPlacer}. */
 export interface ElevenLabsConfig {
   /** ElevenLabs API key. Read from the environment, never hardcoded. */
@@ -54,7 +64,8 @@ export class ElevenLabsPlacer implements CallPlacer {
    *   toNumber: The number Core supplied, if any. Takes priority over the
    *     scenario lookup.
    *
-   * The call runs in the person's language when `languageOf` finds one.
+   * The call runs in the person's language when `languageOf` finds one, and
+   * then opens with {@link ENGLISH_OPENING} before the script.
    *
    * Raises:
    *   Error: If no number is known for the person, or ElevenLabs rejects
@@ -80,7 +91,7 @@ export class ElevenLabsPlacer implements CallPlacer {
         to_number: to,
         conversation_initiation_client_data: {
           conversation_config_override: {
-            agent: { first_message: script, ...(language ? { language } : {}) },
+            agent: language ? { first_message: `${ENGLISH_OPENING} ${script}`, language } : { first_message: script },
           },
           dynamic_variables: { person_id: personId, caller_number: to, reason },
         },

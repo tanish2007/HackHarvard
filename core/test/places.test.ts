@@ -7,8 +7,8 @@ import { resolvePlace, type Point } from "../src/agent/places.js";
 import { makeStore } from "./helpers.js";
 
 const { store } = makeStore();
-const AMIT: Point = { name: "the sender's location", lat: 37.851, lng: -122.224 };
-const CP: Point = { name: "Command Post", lat: 37.8605, lng: -122.255 };
+const AMIT: Point = { name: "the sender's location", lat: 42.374, lng: -71.1175 };
+const CP: Point = { name: "Command Post", lat: 42.3718, lng: -71.1075 };
 
 /**
  * Resolve a query against the committed scenario.
@@ -33,7 +33,7 @@ describe("resolvePlace", () => {
     ["hwy 24", "Route 24"],
     ["Zone 3", "Zone 3"],
     ["Priya", "Priya"],
-    ["nearest shelter", "Shelter C"],
+    ["nearest shelter", "Shelter A"],
     ["Mars", null],
     ["oak stadium", null],
   ])("resolves %j to %j", (query, expected) => {
@@ -47,6 +47,6 @@ describe("resolvePlace", () => {
   });
 
   it("measures the nearest shelter from the origin", () => {
-    expect(nameOf("nearest shelter", CP)).toBe("Shelter B");
+    expect(nameOf("nearest shelter", CP)).toBe("Shelter C");
   });
 });

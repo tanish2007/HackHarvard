@@ -38,6 +38,10 @@ export interface TrackerOptions {
   retryMs?: number;
   /** Logger. Defaults to console.log. */
   log?: (msg: string) => void;
+  /** Called after the feed connects, so known phones can be looked up. */
+  onConnect?: () => void;
+  /** Called when a usable location is remembered. */
+  onUpdate?: (handle: string, location: Location) => void;
 }
 
 interface Entry {
@@ -114,6 +118,7 @@ export class FindMyTracker {
       try {
         this.source = await this.options.open();
         this.log("[findmy] connected");
+        this.options.onConnect?.();
         for await (const update of this.source.watch()) {
           wait = this.options.retryMs ?? 1000;
           this.remember(update);
@@ -134,10 +139,10 @@ export class FindMyTracker {
   private remember(update: LocationUpdate | null): void {
     if (!update || update.latitude === undefined || update.longitude === undefined) return;
     if (Math.abs(update.latitude) > 90 || Math.abs(update.longitude) > 180) return;
-    this.seen.set(normalizePhone(update.address), {
-      location: { lat: update.latitude, lng: update.longitude },
-      at: this.now(),
-    });
+    const handle = normalizePhone(update.address);
+    const location = { lat: update.latitude, lng: update.longitude };
+    this.seen.set(handle, { location, at: this.now() });
+    this.options.onUpdate?.(handle, location);
   }
 }
 

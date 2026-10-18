@@ -99,6 +99,25 @@ describe("/admin", () => {
     expect((await request(fullApp({ bare: true }).app).post("/admin/alert")).status).toBe(503);
   });
 
+  it("POST /admin/clear-fire removes the fire and lets the next alert text again", async () => {
+    const { app, pushed } = fullApp();
+    const first = await request(app).post("/admin/alert");
+    expect(first.body).toEqual({ alerted: 2, person_ids: ["p_amit", "p_priya"], hazards: 1 });
+    const before = (await request(app).get("/state")).body;
+    expect(before.hazards).toHaveLength(1);
+    expect(before.timeline.length).toBeGreaterThan(0);
+    const cleared = await request(app).post("/admin/clear-fire");
+    expect(cleared.body).toEqual({ ok: true });
+    const after = (await request(app).get("/state")).body;
+    expect(after.hazards).toEqual([]);
+    expect(after.timeline).toEqual(before.timeline);
+    expect(after.people.find((p: { person_id: string }) => p.person_id === "p_amit").status).toBe("unconfirmed");
+    pushed.length = 0;
+    const second = await request(app).post("/admin/alert");
+    expect(second.body).toEqual({ alerted: 2, person_ids: ["p_amit", "p_priya"], hazards: 1 });
+    expect(pushed.filter((action) => action.type === "send_text").map((action) => action.person_id).sort()).toEqual(["p_amit", "p_priya"]);
+  });
+
   it("POST /admin/reset makes a second demo run match the first", async () => {
     const { app } = fullApp();
     const run = async () => {

@@ -27,10 +27,10 @@ describe("getPerson", () => {
       role: "resident",
       handle: PHONES.amit,
       status: "unconfirmed",
-      lat: 37.851,
-      lng: -122.224,
+      lat: 42.374,
+      lng: -71.1175,
       language: "en",
-      zone: "zone_3",
+      zone: "zone_1",
       household_id: "h_patel",
       family_contact: "p_priya",
       simulated: false,
@@ -292,7 +292,7 @@ describe("recordContact", () => {
   it("keeps the last known location when given null", () => {
     const { store } = makeStore();
     store.recordContact("p_amit", null);
-    expect(store.getPerson("p_amit")).toMatchObject({ lat: 37.851, lng: -122.224 });
+    expect(store.getPerson("p_amit")).toMatchObject({ lat: 42.374, lng: -71.1175 });
   });
 
   it("puts a new person on the map once they share a location", () => {
