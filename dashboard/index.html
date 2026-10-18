@@ -3,44 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Relay map</title>
+  <title>Relay incident command</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="chrome">
-  <header>
-    <div class="brand-block">
-      <p class="brand">Relay</p>
-      <h1 id="incident-name">Loading incident</h1>
-      <p id="forecast">Loading forecast</p>
-      <p id="forecast-next"></p>
-      <p id="route-note">Loading route</p>
-    </div>
-    <p id="updated"></p>
-    <div class="header-actions">
-      <div class="basemap" role="group" aria-label="Basemap">
-        <button type="button" id="basemap-dark" aria-pressed="true">Dark</button>
-        <button type="button" id="basemap-sat" aria-pressed="false">Satellite</button>
+    <header>
+      <h1>
+        <span class="beacon" aria-hidden="true"></span>
+        <span id="incident-name">RELAY // INCIDENT COMMAND</span>
+      </h1>
+      <p id="updated">Updated just now</p>
+      <div class="header-actions">
+        <div class="basemap" role="group" aria-label="Basemap">
+          <button type="button" id="basemap-dark" aria-pressed="true">Dark</button>
+          <button type="button" id="basemap-sat" aria-pressed="false">Satellite</button>
+        </div>
+        <p id="mode" class="live"><span class="live-dot" aria-hidden="true"></span><span class="mode-label">Live</span></p>
       </div>
-      <p id="mode" class="live">Live</p>
-    </div>
-  </header>
-  <p id="banner" role="status" hidden></p>
+    </header>
+    <p id="banner" role="status" hidden></p>
+    <p id="forecast" class="ghost" hidden>Loading forecast</p>
+    <p id="forecast-next" class="ghost" hidden></p>
+    <p id="route-note" class="ghost" hidden>Loading route</p>
   </div>
   <div class="layout">
     <aside class="counts" aria-label="Resident counts">
       <button type="button" class="count safe" data-status="safe" aria-pressed="false">
-        <span id="count-safe">0</span><span class="count-label">Safe</span>
+        <span class="count-label">Safe</span>
+        <span class="count-value" id="count-safe">0</span>
+        <span class="count-sub" id="count-safe-sub">0% of active roster accounted for</span>
       </button>
       <button type="button" class="count unconfirmed" data-status="unconfirmed" aria-pressed="false">
-        <span id="count-unconfirmed">0</span><span class="count-label">Unconfirmed</span>
+        <span class="count-label">Unconfirmed</span>
+        <span class="count-value" id="count-unconfirmed">0</span>
+        <span class="count-sub" id="count-unconfirmed-sub">0% of active roster still unconfirmed</span>
       </button>
       <button type="button" class="count sos" data-status="sos" aria-pressed="false">
-        <span id="count-sos">0</span><span class="count-label">SOS</span>
+        <span class="count-label">SOS</span>
+        <span class="count-value" id="count-sos">0</span>
+        <span class="count-sub" id="count-sos-sub">0% of active roster in distress</span>
       </button>
       <button type="button" class="count en-route" data-status="en_route" aria-pressed="false">
-        <span id="count-en-route">0</span><span class="count-label">En route</span>
+        <span class="count-label">En route</span>
+        <span class="count-value" id="count-en-route">0</span>
+        <span class="count-sub" id="count-en-route-sub">0% of active roster en route</span>
       </button>
     </aside>
     <div class="stage">
@@ -52,27 +60,34 @@
         </div>
         <h2 id="drawer-title" tabindex="-1"></h2>
         <dl id="drawer-rows"></dl>
+        <div id="drawer-confirm" hidden>
+          <label class="confirm-name" for="confirmed-by">Confirmed by
+            <input id="confirmed-by" name="confirmed-by" maxlength="80" autocomplete="name" placeholder="Responder name">
+          </label>
+          <button type="button" id="confirm-sos">Confirm 911 call</button>
+          <p id="confirm-note" role="status"></p>
+        </div>
       </aside>
       <div class="map-foot">
         <label class="window" for="window">
           Detections
           <span id="window-label">24h</span>
-          <input id="window" type="range" min="1" max="48" value="24" aria-valuemin="1" aria-valuemax="48">
+          <input id="window" type="range" min="1" max="48" value="24" aria-valuemin="1" aria-valuemax="48" aria-label="Detections 24h">
         </label>
-        <p id="wind-readout">Wind unavailable</p>
+        <p id="wind-readout" class="weather-chip">Weather unavailable</p>
         <p class="legend" aria-label="Map legend">
           <span><i class="swatch evacuate"></i>Evacuate now</span>
           <span><i class="swatch warning"></i>Warning</span>
-          <span><i class="swatch fire"></i>Fire</span>
-          <span><i class="swatch weather"></i>Weather</span>
+          <span><i class="swatch safe"></i>Safe</span>
           <span><i class="swatch shelter"></i>Shelter</span>
           <span><i class="route-swatch"></i>Route</span>
         </p>
       </div>
     </div>
-    <aside class="feed" aria-label="Incident feed">
+    <aside class="feed" aria-label="Incident log and radio dispatch">
       <div class="feed-head">
-        <h2>Incident feed</h2>
+        <h2>Incident log &amp; radio dispatch</h2>
+        <p class="feed-count"><span id="feed-count">0</span> events</p>
       </div>
       <ol id="feed"></ol>
     </aside>
