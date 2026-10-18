@@ -250,22 +250,25 @@ def _fake_shelters(lat, lng):
 
 
 def _fake_weather(lat, lng):
-    """Build the scenario forecast.
+    """Return a standing demo forecast.
+
+    The scenario file has no weather block. These values keep the map wind
+    layer and the contract shape working until NWS is on.
 
     Args:
         lat (float): Latitude in decimal degrees. Unused by the fake.
         lng (float): Longitude in decimal degrees. Unused by the fake.
 
     Returns:
-        dict: Forecast fields plus source.
+        dict: Forecast fields plus source fake.
     """
     del lat, lng
     return {
-        "summary": "Forecast is not stored in the scenario.",
-        "wind_mph": 0,
-        "wind_dir": "",
-        "temp_f": 0,
-        "next_2h": "",
+        "summary": "Dry and gusty",
+        "wind_mph": 18,
+        "wind_dir": "NE",
+        "temp_f": 84,
+        "next_2h": "Gusts continue from the northeast",
         "source": "fake",
     }
 
