@@ -24,3 +24,19 @@ export function parseCommand(text: string): Command {
   if (JOIN_WORDS.has(word)) return "join";
   return "other";
 }
+
+const DISTRESS = /\b(sos|emergency|help me|need help|need a rescue|trapped)\b/i;
+
+/**
+ * Check whether a text sounds like a call for help.
+ *
+ * Unlike {@link parseCommand}, the words may appear anywhere in the message, so
+ * "SOS my house is on fire" counts. A false alarm only costs a quick
+ * acknowledgement, and a miss costs far more, so this errs on the side of yes.
+ *
+ * @param text - The raw message text.
+ * @returns True if the text asks for help.
+ */
+export function isDistress(text: string): boolean {
+  return DISTRESS.test(text);
+}
