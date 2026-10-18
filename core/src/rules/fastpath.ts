@@ -164,6 +164,12 @@ const QUESTION_WORDS = new Set([
   "dónde", "cuándo", "qué", "cómo", "cuál", "quién",
 ]);
 
+/** Words that can open an answer: "no I need help", "nope we're trapped". */
+const INTERJECTIONS = new Set(["no", "nope", "nah"]);
+
+/** Subjects that start a new clause after an interjection "no". */
+const SUBJECTS = new Set(["i", "i'm", "im", "we", "we're", "were", "my", "our", "yo", "nosotros"]);
+
 /** How many words before a keyword are checked for a negator. */
 const NEGATION_WINDOW = 3;
 
@@ -265,6 +271,26 @@ function isNegator(word: string): boolean {
 }
 
 /**
+ * Where the words after a leading "no" interjection start.
+ *
+ * Speech-to-text drops commas, so "No, I need help" arrives as "no I need
+ * help". A "no" followed by a subject ("no I", "no we're") answers the
+ * question and starts a new clause. It does not negate what comes after.
+ *
+ * Args:
+ *     words (string[]): Normalized words before a keyword.
+ *
+ * Returns:
+ *     number: The index just after the last interjection "no", or 0.
+ */
+function afterInterjection(words: string[]): number {
+  for (let i = words.length - 2; i >= 0; i--) {
+    if (INTERJECTIONS.has(words[i]) && SUBJECTS.has(words[i + 1])) return i + 1;
+  }
+  return 0;
+}
+
+/**
  * Find a keyword in a clause that is not negated.
  *
  * A match counts unless one of the few words right before it is a negator,
@@ -280,7 +306,8 @@ function isNegator(word: string): boolean {
 function hasUnnegated(clause: string, patterns: RegExp[]): boolean {
   for (const pattern of patterns) {
     for (const m of clause.matchAll(new RegExp(pattern.source, "g"))) {
-      const before = clause.slice(0, m.index).trim().split(" ").filter(Boolean).slice(-NEGATION_WINDOW);
+      const words = clause.slice(0, m.index).trim().split(" ").filter(Boolean);
+      const before = words.slice(afterInterjection(words)).slice(-NEGATION_WINDOW);
       if (!before.some(isNegator)) return true;
     }
   }
