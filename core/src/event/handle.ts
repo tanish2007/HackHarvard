@@ -127,7 +127,7 @@ function resolveSender(event: RelayEvent, store: IncidentStore): Sender {
     person = store.restoreByHandle(event.from);
     if (person) rejoined = true;
     else {
-      person = store.addPerson(event.from, event.location);
+      person = store.addPerson(event.from, event.location, event.person_id ?? undefined);
       isNew = true;
     }
   }

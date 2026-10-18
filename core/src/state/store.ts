@@ -233,14 +233,21 @@ export class IncidentStore {
    * Args:
    *     handle (string): Their phone number or iMessage email.
    *     location ({ lat: number, lng: number } | null): Where they are, if shared.
+   *     preferredId (string | undefined): The person_id the channel already
+   *         uses for them (Text makes one up for numbers not in the
+   *         scenario). Used when free, so Core's replies carry the id the
+   *         channel expects. Otherwise Core picks "p_new_N".
    *
    * Returns:
    *     TrackedPerson: A copy of the new person, status unconfirmed.
    */
-  addPerson(handle: string, location: { lat: number; lng: number } | null): TrackedPerson {
+  addPerson(handle: string, location: { lat: number; lng: number } | null, preferredId?: string): TrackedPerson {
     this.newPeopleCount++;
     let id = `p_new_${this.newPeopleCount}`;
     while (this.people.has(id)) id = `p_new_${++this.newPeopleCount}`;
+    const taken = (candidate: string) =>
+      this.people.has(candidate) || this.optedOut.has(candidate) || this.units.has(candidate);
+    if (preferredId && !taken(preferredId)) id = preferredId;
     const person: TrackedPerson = {
       person_id: id,
       name: `New resident ${this.newPeopleCount}`,
