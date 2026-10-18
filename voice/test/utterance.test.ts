@@ -56,11 +56,20 @@ describe("handleUtterance", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("ignores unknown numbers", async () => {
+  it("forwards unknown numbers with a null person_id", async () => {
     const { session, deps, fetchImpl } = setup();
     const event = await handleUtterance({ channel: "voice", from: "+19998887777", text: "hello", session }, deps);
-    expect(event).toBeNull();
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(deps.log).toHaveBeenCalled();
+    expect(event?.person_id).toBeNull();
+    expect(event?.from).toBe("+19998887777");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("uses the person id carried from the place_call over a lookup", async () => {
+    const { session, deps } = setup();
+    const event = await handleUtterance(
+      { channel: "voice", from: "+15551234567", personId: "p_amit", text: "I am okay", session },
+      deps,
+    );
+    expect(event?.person_id).toBe("p_amit");
   });
 });

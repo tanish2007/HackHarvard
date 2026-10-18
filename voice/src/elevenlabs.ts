@@ -71,7 +71,7 @@ export class ElevenLabsPlacer implements CallPlacer {
         to_number: to,
         conversation_initiation_client_data: {
           conversation_config_override: { agent: { first_message: script } },
-          dynamic_variables: { person_id: personId, reason },
+          dynamic_variables: { person_id: personId, caller_number: to, reason },
         },
       }),
       signal: AbortSignal.timeout(this.config.timeoutMs ?? 10000),
