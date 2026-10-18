@@ -623,6 +623,17 @@ describe("agent time limit", () => {
     expect(AGENT_TIMEOUT_MS).toBe(3200);
   });
 
+  it("lets AGENT_TIMEOUT_MS in the environment raise the wait, and ignores a bad value", async () => {
+    vi.resetModules();
+    vi.stubEnv("AGENT_TIMEOUT_MS", "9000");
+    expect((await import("../src/event/handle.js")).AGENT_TIMEOUT_MS).toBe(9000);
+    vi.resetModules();
+    vi.stubEnv("AGENT_TIMEOUT_MS", "soon");
+    expect((await import("../src/event/handle.js")).AGENT_TIMEOUT_MS).toBe(3200);
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
   it("aborts the agent and replies with the fallback once the limit passes", async () => {
     vi.useFakeTimers();
     vi.spyOn(console, "error").mockImplementation(() => {});
