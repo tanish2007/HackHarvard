@@ -116,8 +116,25 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
   let polling = false;
   let cancelNext: Cancel = () => {};
 
+  /**
+   * A summary for a run that alerted nobody.
+   *
+   * Returns:
+   *     AlertSummary: Zero alerts, with the current hazard count.
+   */
   const empty = (): AlertSummary => ({ alerted: 0, person_ids: [], hazards: store.listHazards().length });
-  const key = (personId: string, hazardId: string) => `${personId}|${hazardId}`;
+
+  /**
+   * Key for the alerted set.
+   *
+   * Args:
+   *     personId (string): Who was alerted.
+   *     hazardId (string): Which hazard.
+   *
+   * Returns:
+   *     string: "person_id|hazard_id".
+   */
+  const key = (personId: string, hazardId: string): string => `${personId}|${hazardId}`;
 
   /**
    * How far from the incident centre to ask for hazards: far enough to cover
