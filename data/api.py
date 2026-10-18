@@ -2,6 +2,8 @@
 
 DATA_MODE=fake reads scenario.json. DATA_MODE=real tries the live source
 and, on failure, returns the same shape with source set to fallback.
+Fire rows are the exception: real mode returns NASA FIRMS only, or an
+empty list when FIRMS does not answer. The scenario fire is never a stand-in.
 """
 
 from __future__ import annotations
@@ -27,12 +29,16 @@ def get_hazards(lat, lng, radius_km):
 
     Returns:
         list[dict]: Hazard rows. Empty when nothing is in range.
+        In real mode, fire rows are FIRMS detections only.
     """
-    return _with_fallback(
-        lambda: _real_hazards(lat, lng, radius_km),
-        lambda: _fake_hazards(lat, lng, radius_km),
-        _stamp_rows,
-    )
+    if os.environ.get("DATA_MODE", "fake") != "real":
+        return _fake_hazards(lat, lng, radius_km)
+    fires = _live_fires(lat, lng, radius_km)
+    try:
+        weather = fetch_weather_hazards(lat, lng)
+    except DataSourceError:
+        weather = []
+    return fires + weather
 
 
 def get_route(from_lat, from_lng, to_lat, to_lng):
@@ -126,6 +132,23 @@ def _stamp_obj(payload):
         payload (dict): Fake object that includes a source key.
     """
     payload["source"] = "fallback"
+
+
+def _live_fires(lat, lng, radius_km):
+    """Return FIRMS fires, or nothing when FIRMS does not answer.
+
+    Args:
+        lat (float): Search latitude.
+        lng (float): Search longitude.
+        radius_km (float): Search radius in kilometers.
+
+    Returns:
+        list[dict]: Fire rows with source firms. Empty on failure.
+    """
+    try:
+        return fetch_fire_hazards(lat, lng, radius_km)
+    except DataSourceError:
+        return []
 
 
 def _real_hazards(lat, lng, radius_km):
