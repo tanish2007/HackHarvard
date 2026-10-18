@@ -40,13 +40,16 @@ export function createStubData(scenario: Scenario): DataTools {
     updated_at: "",
   });
 
-  const nearestShelterName = (lat: number, lng: number): string => {
+  // Name the route's end after the closest named spot, place or shelter.
+  // Using shelters only (as data/api.py does) made a route to Oak St say
+  // "Leave toward Shelter C", and the agent repeated it on the radio.
+  const nearestName = (lat: number, lng: number): string => {
     let best: { name: string; d: number } | null = null;
-    for (const s of scenario.shelters) {
+    for (const s of [...scenario.places, ...scenario.shelters]) {
       const d = distanceKm(lat, lng, s.lat, s.lng);
       if (!best || d < best.d) best = { name: s.name, d };
     }
-    return best?.name ?? "the shelter";
+    return best?.name ?? "your destination";
   };
 
   return {
@@ -86,12 +89,12 @@ export function createStubData(scenario: Scenario): DataTools {
       for (let i = 1; i < polyline.length; i++) {
         distance += distanceKm(polyline[i - 1].lat, polyline[i - 1].lng, polyline[i].lat, polyline[i].lng);
       }
-      const shelter = nearestShelterName(toLat, toLng);
+      const endName = nearestName(toLat, toLng);
       const avoided = waypoint ? [f.id] : [];
       return {
         distance_km: Math.round(distance * 100) / 100,
         duration_min: Math.round((distance / EVAC_KMH) * 60 * 10) / 10,
-        steps: [`Leave toward ${shelter}.`, ...avoided.map((id) => `Stay outside the ${id} fire circle.`), `Arrive at ${shelter}.`],
+        steps: [`Leave toward ${endName}.`, ...avoided.map((id) => `Stay outside the ${id} fire circle.`), `Arrive at ${endName}.`],
         polyline,
         avoided_hazards: avoided,
         source: "fake",
