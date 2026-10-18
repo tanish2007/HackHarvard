@@ -10,6 +10,7 @@ import { createGeminiClient, DEFAULT_GEMINI_MODEL } from "./core/src/agent/gemin
 import { createAgent } from "./core/src/agent/loop.js";
 import { createCoreRouter } from "./core/src/app.js";
 import { createStubData } from "./core/src/data/stub.js";
+import { createHttpDispatcher } from "./core/src/dispatch/outbound.js";
 import type { Agent } from "./core/src/event/handle.js";
 import { jsonErrorHandler } from "./core/src/lib/asyncHandler.js";
 import { loadScenario, placeholderIds } from "./core/src/scenario/load.js";
@@ -30,6 +31,11 @@ const store = new IncidentStore(scenario);
 // Rudra's Contract C functions are Python. Until they are reachable over
 // HTTP, the agent uses a TypeScript stub with the same shapes.
 const data = createStubData(scenario);
+// Pushes actions Core starts on its own (alerts, timers) to Text and Voice.
+const dispatcher = createHttpDispatcher({
+  textUrl: process.env.TEXT_ACTIONS_URL || undefined,
+  voiceUrl: process.env.VOICE_ACTIONS_URL || undefined,
+});
 
 let agent: Agent | undefined;
 if (process.env.GEMINI_API_KEY) {
@@ -42,7 +48,7 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 const app = express();
-app.use(createCoreRouter({ scenario, store, agent }));
+app.use(createCoreRouter({ scenario, store, agent, dispatcher }));
 app.use(jsonErrorHandler);
 
 const port = Number(process.env.PORT ?? 3000);

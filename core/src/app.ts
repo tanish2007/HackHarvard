@@ -7,6 +7,7 @@
 import express, { Router } from "express";
 import { handleEvent, type Agent } from "./event/handle.js";
 import { parseEvent } from "./event/schema.js";
+import type { Dispatcher } from "./dispatch/outbound.js";
 import { asyncHandler, jsonErrorHandler } from "./lib/asyncHandler.js";
 import type { Scenario } from "./scenario/schema.js";
 import type { IncidentStore } from "./state/store.js";
@@ -17,12 +18,16 @@ import type { IncidentStore } from "./state/store.js";
  * Attributes:
  *     scenario (Scenario): The loaded scenario (Contract E).
  *     store (IncidentStore): The live incident state.
- *     agent (Agent | undefined): The LLM agent. Optional until the agent step.
+ *     agent (Agent | undefined): The LLM agent. Without it, only the keyword
+ *         rules answer.
+ *     dispatcher (Dispatcher | undefined): Pushes actions Core starts on its
+ *         own to Text and Voice. Used by alerts, timers, and admin routes.
  */
 export interface CoreDeps {
   scenario: Scenario;
   store: IncidentStore;
   agent?: Agent;
+  dispatcher?: Dispatcher;
 }
 
 /**
