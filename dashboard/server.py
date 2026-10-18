@@ -1,9 +1,13 @@
 """Local map server for Rudra's lane.
 
-Serves the dashboard and a stand-in GET /state until Tirth's endpoint is
-live. Also writes dashboard/backup-state.json on each successful read.
-GET /picture is map chrome only: zones, wind, and scenario phones. It is
-not part of Contract D.
+GET /state prefers Core at http://localhost:3000/state. A good read is
+saved as dashboard/backup-state.json. A failed read leaves that file
+alone. GET /picture is map chrome only: zones, wind, and scenario phones.
+It is not part of Contract D.
+
+Contract C is also on this server. /weather and /route with no query
+stay the map's existing calls. lat/lng query params call the functions
+directly.
 
     python dashboard/server.py
 """
@@ -11,11 +15,14 @@ not part of Contract D.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_DIR = Path(__file__).resolve().parent
@@ -23,26 +30,125 @@ BACKUP = DASHBOARD_DIR / "backup-state.json"
 HOST = "127.0.0.1"
 PORT = 8080
 PICTURE_TTL_SEC = 30
+CORE_BASE = "http://localhost:3000"
+CORE_STATE_URL = CORE_BASE + "/state"
+CORE_TIMEOUT_SEC = 0.8
+CONTRACT_LISTS = (
+    "hazards",
+    "shelters",
+    "people",
+    "volunteers",
+    "reports",
+    "units",
+    "timeline",
+)
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data.api import get_weather  # noqa: E402
+from data.api import get_hazards, get_route, get_shelters, get_weather  # noqa: E402
 from data.scenario import load_scenario  # noqa: E402
 from data.state import build_route, build_state, build_weather  # noqa: E402
 
 _picture_cache = {"at": 0.0, "body": b""}
 
 
-def state_bytes():
-    """Serialize Contract D and refresh the backup file.
+def fetch_core_state():
+    """GET Contract D from Core.
 
     Returns:
-        bytes: UTF-8 JSON for the current picture.
+        bytes: Core's JSON body, unchanged.
+
+    Raises:
+        urllib.error.URLError: If Core does not answer in time.
+        ValueError: If the body is not Contract D.
+        json.JSONDecodeError: If the body is not JSON.
     """
-    body = json.dumps(build_state()).encode("utf-8")
+    request = urllib.request.Request(
+        CORE_STATE_URL,
+        headers={"Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=CORE_TIMEOUT_SEC) as response:
+        body = response.read()
+    payload = json.loads(body)
+    if not isinstance(payload, dict):
+        raise ValueError("Core state is not an object")
+    for key in CONTRACT_LISTS:
+        if not isinstance(payload.get(key), list):
+            raise ValueError("Missing list: " + key)
+    if not isinstance(payload.get("incident"), dict):
+        raise ValueError("Core state is missing incident")
+    if not isinstance(payload.get("counts"), dict):
+        raise ValueError("Core state is missing counts")
+    return body
+
+
+def state_bytes():
+    """Return Core's Contract D and refresh the backup file.
+
+    Returns:
+        bytes: UTF-8 JSON from Core.
+
+    Raises:
+        urllib.error.URLError: If Core does not answer. The backup file
+            is left untouched.
+        ValueError: If Core's body is not Contract D.
+    """
+    body = fetch_core_state()
     BACKUP.write_bytes(body)
     return body
+
+
+def seed_backup():
+    """Make sure a backup file exists before the first poll.
+
+    Core's picture is saved when Core is up. Otherwise the scenario
+    picture is written only if the backup file is missing.
+    """
+    try:
+        state_bytes()
+    except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError):
+        if not BACKUP.exists():
+            BACKUP.write_bytes(json.dumps(build_state()).encode("utf-8"))
+
+
+def client_config_bytes():
+    """Tell the map where Core is, and the admin token if one is set.
+
+    The token stays out of the page source. The map asks for it so a
+    confirm can send x-relay-admin. An empty token means the header is
+    omitted.
+
+    Returns:
+        bytes: UTF-8 JSON with core and admin_token.
+    """
+    payload = {
+        "core": CORE_BASE,
+        "admin_token": os.environ.get("RELAY_ADMIN_TOKEN", "").strip(),
+    }
+    return json.dumps(payload).encode("utf-8")
+
+
+def _query_float(qs, name):
+    """Read one required float from a query string.
+
+    Args:
+        qs (dict): Values from parse_qs.
+        name (str): Parameter name.
+
+    Returns:
+        float: The parsed value.
+
+    Raises:
+        ValueError: If the parameter is missing or not a number.
+    """
+    raw = (qs.get(name) or [None])[0]
+    if raw is None or raw == "":
+        raise ValueError(name + " is required")
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(name + " must be a number") from exc
 
 
 def picture_bytes():
@@ -101,21 +207,50 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(DASHBOARD_DIR), **kwargs)
 
     def do_GET(self):
-        """Route /state, /picture, /weather, /route, and the backup file.
+        """Route state, picture, Contract C, and the backup file.
 
-        Sends JSON for the data paths. A failed /state leaves the backup
-        file untouched so the map can still show the last good picture.
+        A failed /state leaves the backup file untouched so the map can
+        still show the last good picture.
         """
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
+        if path == "/hazards":
+            self._contract(lambda: get_hazards(
+                _query_float(qs, "lat"),
+                _query_float(qs, "lng"),
+                _query_float(qs, "radius_km"),
+            ))
+            return
+        if path == "/shelters":
+            self._contract(lambda: get_shelters(
+                _query_float(qs, "lat"),
+                _query_float(qs, "lng"),
+            ))
+            return
         if path == "/route":
-            try:
-                self._send(json.dumps(build_route()).encode("utf-8"))
-            except Exception as exc:
-                self._send_error(exc)
+            if any(key in qs for key in ("from_lat", "from_lng", "to_lat", "to_lng")):
+                self._contract(lambda: get_route(
+                    _query_float(qs, "from_lat"),
+                    _query_float(qs, "from_lng"),
+                    _query_float(qs, "to_lat"),
+                    _query_float(qs, "to_lng"),
+                ))
+            else:
+                self._contract(build_route)
             return
         if path == "/weather":
+            if "lat" in qs or "lng" in qs:
+                self._contract(lambda: get_weather(
+                    _query_float(qs, "lat"),
+                    _query_float(qs, "lng"),
+                ))
+            else:
+                self._contract(build_weather)
+            return
+        if path == "/client-config":
             try:
-                self._send(json.dumps(build_weather()).encode("utf-8"))
+                self._send(client_config_bytes())
             except Exception as exc:
                 self._send_error(exc)
             return
@@ -133,12 +268,25 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/backup-state.json":
             if not BACKUP.exists():
-                state_bytes()
+                seed_backup()
             self._send(BACKUP.read_bytes())
             return
         if path == "/":
             self.path = "/index.html"
         super().do_GET()
+
+    def _contract(self, build):
+        """Send a Contract C payload, or a 400 for a bad query.
+
+        Args:
+            build (callable): Returns the JSON-ready value.
+        """
+        try:
+            self._send(json.dumps(build()).encode("utf-8"))
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+        except Exception as exc:
+            self._send_error(exc)
 
     def _send(self, body):
         """Write a JSON response.
@@ -146,12 +294,22 @@ class Handler(SimpleHTTPRequestHandler):
         Args:
             body (bytes): JSON payload.
         """
-        self.send_response(200)
+        self._send_json(200, body)
+
+    def _send_json(self, status, body):
+        """Write a JSON response with an explicit status.
+
+        Args:
+            status (int): HTTP status code.
+            body (bytes | dict): JSON payload.
+        """
+        raw = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(raw)
 
     def _send_error(self, exc):
         """Write a JSON error without touching the backup file.
@@ -174,7 +332,7 @@ def main():
     Raises:
         OSError: If the port is already taken.
     """
-    state_bytes()
+    seed_backup()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Map at http://{HOST}:{PORT}")
     server.serve_forever()
