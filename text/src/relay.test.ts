@@ -9,7 +9,7 @@ import type { CoreResponse, RelayEvent } from "./contracts.js";
 import { ACKNOWLEDGED, GOODBYE, SOS_RECEIVED, WELCOME } from "./handler.js";
 import { PeopleDirectory } from "./people.js";
 import { Registry } from "./registry.js";
-import { processText, type RelayDeps } from "./relay.js";
+import { findMyFor, processText, type RelayDeps } from "./relay.js";
 
 const AMIT = "+16175550101";
 const NOW = new Date("2026-10-17T14:02:00Z");
@@ -347,4 +347,16 @@ test("a call for help waits only briefly for Find My", async () => {
   await run(deps, "+14134727634", "SOS");
   await run(deps, "+14134727634", "where is the shelter");
   assert.deepEqual(fake.asked.map((a) => a.timeoutMs), [400, 1500]);
+});
+
+test("findMyFor uses Find My for strangers and skips scenario people unless switched on", async () => {
+  const { deps } = makeDeps({ actions: [] });
+  assert.equal(await findMyFor(deps, "+14134727634", 100), null, "no tracker, no location");
+
+  deps.findMy = fakeFindMy(PIN).findMy;
+  assert.deepEqual(await findMyFor(deps, "+14134727634", 100), PIN);
+  assert.equal(await findMyFor(deps, AMIT, 100), null);
+
+  deps.findMyOverridesScenario = true;
+  assert.deepEqual(await findMyFor(deps, AMIT, 100), PIN);
 });

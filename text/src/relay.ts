@@ -104,13 +104,8 @@ export async function processText(
   const distress = isDistress(text);
 
   // With no location in the message, use their live Find My location if they
-  // share it. Scenario people keep their scenario location unless told
-  // otherwise, so the demo's fire and map stay consistent. A call for help
-  // waits only briefly for it.
-  let where = location;
-  if (!where && deps.findMy && (!who.known || deps.findMyOverridesScenario)) {
-    where = await deps.findMy.latest(phone, distress ? 400 : 1500);
-  }
+  // share it. A call for help waits only briefly for it.
+  const where = location ?? (await findMyFor(deps, phone, distress ? 400 : 1500));
   const event = buildEvent(deps, phone, text, where);
 
   // Start the Core call first. Core answers a call for help with its own SOS
@@ -141,6 +136,27 @@ export async function processText(
 
   // Nobody is left without a reply, even if Core is down or has nothing to say.
   if (sent === 0 && !acknowledged && !replied) await send(distress ? SOS_RECEIVED : ACKNOWLEDGED);
+}
+
+/**
+ * Look up someone's live Find My location, if we should use it.
+ *
+ * Scenario people keep their scenario location unless Find My is switched on
+ * for them too, so the demo's fire and map stay consistent.
+ *
+ * Args:
+ *     deps: The Find My tracker and phone lookup.
+ *     phone: The person's phone number or email.
+ *     timeoutMs: How long to wait for a direct request.
+ *
+ * Returns:
+ *     Location | null: Their Find My location, or null if there is none or it
+ *         should not be used.
+ */
+export async function findMyFor(deps: RelayDeps, phone: string, timeoutMs: number): Promise<Location | null> {
+  if (!deps.findMy) return null;
+  if (deps.directory.resolve(phone).known && !deps.findMyOverridesScenario) return null;
+  return deps.findMy.latest(phone, timeoutMs);
 }
 
 /**
