@@ -99,11 +99,20 @@ export interface FireSpread {
   fireline_intensity_kw_m: number;
   computed_at: string;
   forecast: { minutes: number; polygon: { lat: number; lng: number }[] }[];
+  /** What was assumed, e.g. fuel for a live NASA fire with no fuel map. */
+  note?: string;
 }
 
-/** A hazard on /state. Fires may carry a projected spread. */
+/**
+ * A hazard on /state. Fires may carry a projected spread.
+ *
+ * Live NASA FIRMS fires (source "firms") also carry the name of the search
+ * area they were found in. They are shown for information only and never
+ * trigger alerts or calls.
+ */
 export interface StateHazard extends Hazard {
   spread?: FireSpread;
+  area?: string;
 }
 
 /** Contract C hazard shape, reused as-is in /state. */

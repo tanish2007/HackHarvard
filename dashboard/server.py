@@ -52,6 +52,7 @@ if str(ROOT) not in sys.path:
 from data.api import get_hazards, get_route, get_shelters, get_weather  # noqa: E402
 from data.errors import DataSourceError  # noqa: E402
 from data.firms import fetch_fire_hazards  # noqa: E402
+from data.nws import fetch_weather  # noqa: E402
 from data.scenario import load_scenario  # noqa: E402
 from data.state import build_route, build_state, build_weather  # noqa: E402
 
@@ -349,6 +350,21 @@ class Handler(SimpleHTTPRequestHandler):
                 _query_float(qs, "lng"),
                 _query_float(qs, "radius_km"),
             ))
+            return
+        if path == "/live-weather":
+            # Always live NWS, whatever DATA_MODE is, for Core's spread
+            # forecast on live NASA fires. 502 when NWS has no forecast for
+            # the point (outside the US) or does not answer.
+            try:
+                lat = _query_float(qs, "lat")
+                lng = _query_float(qs, "lng")
+            except ValueError as exc:
+                self._send_json(400, json.dumps({"error": str(exc)}).encode("utf-8"))
+                return
+            try:
+                self._send(json.dumps(fetch_weather(lat, lng)).encode("utf-8"))
+            except Exception as exc:  # NWS 404s outside the US, network errors
+                self._send_json(502, {"error": str(exc)})
             return
         if path == "/hazards":
             self._contract(lambda: get_hazards(
