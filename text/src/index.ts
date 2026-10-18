@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 import { createActionsServer } from "./actionsServer.js";
@@ -7,8 +9,11 @@ import { Registry } from "./registry.js";
 import { processText, type RelayDeps } from "./relay.js";
 
 const coreUrl = process.env.CORE_URL || "http://localhost:3000";
+// Saved next to the project, so a restart keeps everyone who has signed up.
+const registryFile =
+  process.env.REGISTRY_FILE || join(dirname(fileURLToPath(import.meta.url)), "..", "data", "registry.json");
 const deps: RelayDeps = {
-  registry: new Registry(),
+  registry: new Registry(registryFile),
   directory: loadDirectory(),
   postEvent: (event) => postEvent(event, { coreUrl }),
 };
