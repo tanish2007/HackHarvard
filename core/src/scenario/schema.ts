@@ -80,6 +80,25 @@ const settingsSchema = z.object({
   alerts: z.enum(["manual", "auto"]).default("manual"),
 });
 
+/**
+ * Inputs for the fire spread model (core/src/fire/). Every field has a
+ * default, so the whole block is optional.
+ */
+const fireBehaviorSchema = z.object({
+  _readme: z.string().optional(),
+  /** Standard fuel model code (Anderson 13 or Scott and Burgan 40), e.g. "GR2". */
+  fuel_model: z.string().min(1).default("GR2"),
+  /** Scott and Burgan moisture scenario, e.g. "D1L1" (very dry, cured grass). */
+  moisture_scenario: z.string().min(1).default("D1L1"),
+  /** Height the weather wind is measured at. NWS forecasts are 10 m. */
+  wind_height: z.enum(["10m", "20ft", "midflame"]).default("10m"),
+  /** Slope steepness in percent, and the direction the slope faces. 0 = flat. */
+  slope_percent: z.number().min(0).default(0),
+  aspect_deg: z.number().min(0).max(360).default(0),
+  /** How far ahead to project the perimeter, in minutes. */
+  forecast_minutes: z.array(z.number().positive()).min(1).default([30, 60, 120]),
+});
+
 /** A named spot people say out loud: "route to Oak St". */
 const placeSchema = z.object({
   id: z.string().min(1),
@@ -116,6 +135,7 @@ export const scenarioFileSchema = z.object({
   emergency_contact: z.object({ label: z.string().min(1), phone: phoneSchema }),
   agents: z.array(agentSchema),
   settings: settingsSchema,
+  fire_behavior: fireBehaviorSchema.default(() => fireBehaviorSchema.parse({})),
 });
 
 export const localOverrideSchema = z

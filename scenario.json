@@ -118,5 +118,14 @@
     "wake_phrase": "relay",
     "command_post": "pl_command_post",
     "alerts": "manual"
+  },
+  "fire_behavior": {
+    "_readme": "Inputs for Core's fire spread model (core/src/fire). GR2 is low load dry grass, D1L1 is very dry with cured grass (red flag conditions). The wind comes from the weather data, measured at 10 m.",
+    "fuel_model": "GR2",
+    "moisture_scenario": "D1L1",
+    "wind_height": "10m",
+    "slope_percent": 0,
+    "aspect_deg": 0,
+    "forecast_minutes": [30, 60, 120]
   }
 }

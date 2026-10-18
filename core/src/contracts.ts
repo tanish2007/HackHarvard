@@ -61,6 +61,51 @@ export interface CoreResponse {
   actions: RelayAction[];
 }
 
+/**
+ * Projected spread of one fire, from Core's fire model (core/src/fire/).
+ * An optional addition to a fire hazard on /state.
+ *
+ * Attributes:
+ *     model (string): Which model made it, for the map's label.
+ *     fuel_model (string): Fuel model code, e.g. "GR2".
+ *     fuel_name (string): Its description.
+ *     moisture_scenario (string): Fuel moisture used, e.g. "D1L1".
+ *     wind_mph (number): Wind used, as reported (not midflame).
+ *     wind_from_deg (number): Direction the wind comes from, degrees.
+ *     head_direction_deg (number): Direction the head fire moves toward.
+ *     head_m_per_min (number): Head fire spread rate.
+ *     back_m_per_min (number): Backing spread rate.
+ *     flank_m_per_min (number): Flanking spread rate.
+ *     length_to_width (number): Fire ellipse length to width ratio.
+ *     flame_length_m (number): Head fire flame length.
+ *     fireline_intensity_kw_m (number): Head fire intensity.
+ *     computed_at (string): ISO time the forecast starts from.
+ *     forecast ({ minutes: number, polygon: { lat, lng }[] }[]): Projected
+ *         perimeters, nearest time first.
+ */
+export interface FireSpread {
+  model: string;
+  fuel_model: string;
+  fuel_name: string;
+  moisture_scenario: string;
+  wind_mph: number;
+  wind_from_deg: number;
+  head_direction_deg: number;
+  head_m_per_min: number;
+  back_m_per_min: number;
+  flank_m_per_min: number;
+  length_to_width: number;
+  flame_length_m: number;
+  fireline_intensity_kw_m: number;
+  computed_at: string;
+  forecast: { minutes: number; polygon: { lat: number; lng: number }[] }[];
+}
+
+/** A hazard on /state. Fires may carry a projected spread. */
+export interface StateHazard extends Hazard {
+  spread?: FireSpread;
+}
+
 /** Contract C hazard shape, reused as-is in /state. */
 export interface Hazard {
   id: string;
@@ -146,7 +191,7 @@ export interface StateCounts {
  */
 export interface StateResponse {
   incident: { name: string; updated_at: string };
-  hazards: Hazard[];
+  hazards: StateHazard[];
   shelters: Shelter[];
   people: StatePerson[];
   volunteers: StateVolunteer[];
