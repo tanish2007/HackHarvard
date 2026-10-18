@@ -57,9 +57,12 @@ export function loadScenario(options: LoadOptions = {}): Scenario {
     applyOverride(file, localOverrideSchema.parse(readJson(localPath)));
   }
 
-  checkReferences(file);
+  checkSimulatedPopulation(file);
+  const people = [...file.people, ...generateSimulated(file)];
+  checkReferences(file, people);
+
   const { _readme, simulated_population, ...rest } = file;
-  return { ...rest, people: [...file.people, ...generateSimulated(file)] };
+  return { ...rest, people };
 }
 
 /**
@@ -129,24 +132,52 @@ function applyOverride(file: ScenarioFile, override: LocalOverride): void {
 }
 
 /**
- * Check that ids are unique and every reference points at something real.
+ * Check the simulated population settings before generating people from them.
  *
  * Args:
  *     file (ScenarioFile): The parsed scenario.
  *
  * Raises:
+ *     Error: If sos + unconfirmed is more than count, or there are no zones
+ *         to place simulated people in.
+ */
+function checkSimulatedPopulation(file: ScenarioFile): void {
+  const sim = file.simulated_population;
+  if (sim.sos + sim.unconfirmed > sim.count) {
+    throw new Error("simulated_population: sos + unconfirmed is more than count");
+  }
+  if (sim.count > 0 && file.zones.length === 0) {
+    throw new Error("simulated_population needs at least one zone");
+  }
+}
+
+/**
+ * Check that ids are unique and every reference points at something real.
+ *
+ * People and units share one id space, because scenario.local.json targets
+ * either by id. "emergency_contact" is reserved for the same reason.
+ *
+ * Args:
+ *     file (ScenarioFile): The parsed scenario.
+ *     people (ScenarioPerson[]): Named and generated people together, so a
+ *         named id cannot collide with a generated sim_ id.
+ *
+ * Raises:
  *     Error: On a duplicate id or a dangling zone, family, or agent reference.
  */
-function checkReferences(file: ScenarioFile): void {
-  const personIds = new Set<string>();
-  for (const p of file.people) {
-    if (personIds.has(p.person_id)) throw new Error(`Duplicate person_id "${p.person_id}"`);
-    personIds.add(p.person_id);
-  }
+function checkReferences(file: ScenarioFile, people: ScenarioPerson[]): void {
+  assertUnique("person_id", people.map((p) => p.person_id));
+  assertUnique("zone id", file.zones.map((z) => z.id));
+  assertUnique("shelter id", file.shelters.map((s) => s.id));
+  assertUnique("unit_id", file.units.map((u) => u.unit_id));
+  assertUnique("agent_id", file.agents.map((a) => a.agent_id));
+  assertUnique("person or unit id", [...people.map((p) => p.person_id), ...file.units.map((u) => u.unit_id), EMERGENCY_KEY]);
+
+  const personIds = new Set(people.map((p) => p.person_id));
   const zoneIds = new Set(file.zones.map((z) => z.id));
   const agentIds = new Set(file.agents.map((a) => a.agent_id));
 
-  for (const p of file.people) {
+  for (const p of people) {
     if (p.zone && !zoneIds.has(p.zone)) throw new Error(`${p.person_id}: unknown zone "${p.zone}"`);
     if (p.family_contact && !personIds.has(p.family_contact)) {
       throw new Error(`${p.person_id}: unknown family_contact "${p.family_contact}"`);
@@ -157,12 +188,23 @@ function checkReferences(file: ScenarioFile): void {
       if (!agentIds.has(t)) throw new Error(`${a.agent_id}: trusts unknown agent "${t}"`);
     }
   }
-  const sim = file.simulated_population;
-  if (sim.sos + sim.unconfirmed > sim.count) {
-    throw new Error("simulated_population: sos + unconfirmed is more than count");
-  }
-  if (sim.count > 0 && file.zones.length === 0) {
-    throw new Error("simulated_population needs at least one zone");
+}
+
+/**
+ * Throw on the first id that appears twice.
+ *
+ * Args:
+ *     label (string): What kind of id this is, for the error message.
+ *     ids (string[]): The ids to check.
+ *
+ * Raises:
+ *     Error: Naming the label and the duplicated id.
+ */
+function assertUnique(label: string, ids: string[]): void {
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) throw new Error(`Duplicate ${label} "${id}"`);
+    seen.add(id);
   }
 }
 
