@@ -5,7 +5,8 @@
  *   npm run ring
  *
  * Reads credentials from .env and rings TEST_CALL_TO. Set RING_PERSON_ID to
- * tie the call to a person in scenario.json, for example p_amit.
+ * tie the call to a person in scenario.json, for example p_amit. Set
+ * RING_SCRIPT to change the opening line.
  */
 import { ElevenLabsPlacer } from "../src/elevenlabs.js";
 
@@ -36,5 +37,10 @@ const placer = new ElevenLabsPlacer({
   timeoutMs: 30000,
 });
 
-await placer.placeCall(process.env.RING_PERSON_ID ?? "p_test", "This is Relay. Are you okay?", "smoke_test", null);
+await placer.placeCall(
+  process.env.RING_PERSON_ID ?? "p_test",
+  process.env.RING_SCRIPT ?? "This is Relay. Are you okay?",
+  "smoke_test",
+  null,
+);
 console.log(`call requested to ${to}`);
