@@ -219,3 +219,61 @@ test("SOS still gets exactly one reply when Core is down", async () => {
   await run(deps, AMIT, "hello");
   assert.deepEqual(await run(deps, AMIT, "SOS"), [SOS_RECEIVED]);
 });
+
+const PIN = { lat: 40.7, lng: -74.0 };
+
+/** Run one text with a shared location and return every reply that was sent. */
+async function runShared(deps: RelayDeps, phone: string, text: string, location: typeof PIN): Promise<string[]> {
+  const sent: string[] = [];
+  await processText(deps, phone, text, async (reply) => void sent.push(reply), { location });
+  return sent;
+}
+
+test("a shared location goes to Core with empty text, and Core's reply comes back", async () => {
+  const thanks = { ...SEND_AMIT, text: "Thanks, got your location." };
+  const { deps, events } = makeDeps({ actions: [thanks] });
+  await run(deps, AMIT, "hello");
+  assert.deepEqual(await runShared(deps, AMIT, "", PIN), ["Thanks, got your location."]);
+  assert.equal(events[0]!.text, "");
+  assert.deepEqual(events[0]!.location, PIN);
+});
+
+test("a shared location replaces the scenario location", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  await run(deps, AMIT, "hello");
+  await runShared(deps, AMIT, "", PIN);
+  assert.deepEqual(events[0]!.location, PIN);
+});
+
+test("a location sent with a first message signs them up and still reaches Core", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  assert.deepEqual(await runShared(deps, "+14134727634", "", PIN), [WELCOME]);
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0]!.location, PIN);
+  assert.equal(events[0]!.person_id, "p_7634");
+});
+
+test("someone who sent STOP does not have a shared location passed on", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  await run(deps, AMIT, "hello");
+  await run(deps, AMIT, "STOP");
+  const before = events.length;
+  await runShared(deps, AMIT, "", PIN);
+  assert.equal(events.length, before);
+});
+
+test("a Maps link in the text gives Core the coordinates and keeps the text", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  await run(deps, AMIT, "hello");
+  const link = "https://maps.apple.com/?ll=40.7,-74.0&q=Dropped%20Pin";
+  await run(deps, AMIT, link);
+  assert.equal(events[0]!.text, link);
+  assert.deepEqual(events[0]!.location, PIN);
+});
+
+test("typed coordinates reach Core as the location", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  await run(deps, "+14134727634", "hello");
+  await run(deps, "+14134727634", "I'm at 40.700, -74.000 near the bridge");
+  assert.deepEqual(events[0]!.location, PIN);
+});
