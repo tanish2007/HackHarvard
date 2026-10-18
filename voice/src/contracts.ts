@@ -18,12 +18,13 @@ export interface Location {
 /**
  * Contract A: an event handed from a channel to Core.
  *
- * `location` and `media_url` may be null but are never missing.
+ * `location` and `media_url` may be null but are never missing. `person_id`
+ * may be null: Core then resolves the person from `from`.
  */
 export interface RelayEvent {
   event_id: string;
   channel: Channel;
-  person_id: string;
+  person_id: string | null;
   from: string;
   text: string;
   location: Location | null;
@@ -35,6 +36,8 @@ export interface RelayEvent {
 export interface SendTextAction {
   type: "send_text";
   person_id: string;
+  /** The person's handle, for people who are not in scenario.json. */
+  to: string | null;
   text: string;
   map_url: string | null;
 }
@@ -43,6 +46,8 @@ export interface SendTextAction {
 export interface PlaceCallAction {
   type: "place_call";
   person_id: string;
+  /** Phone number to call, for people who are not in scenario.json. */
+  to: string | null;
   script: string;
   reason: string;
 }

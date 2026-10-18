@@ -26,12 +26,17 @@ export interface ExecutorDeps {
  * Args:
  *   actions: The actions Core returned.
  *   deps: The open call, the call placer and a logger.
+ *
+ * Returns:
+ *   The number of actions that were attempted and failed. Skipped actions
+ *   are not counted.
  */
 export async function executeActions(
   actions: RelayAction[],
   deps: ExecutorDeps,
-): Promise<void> {
+): Promise<number> {
   const log = deps.log ?? ((m: string) => console.warn(m));
+  let failed = 0;
   for (const action of actions) {
     try {
       if (action.type === "say") {
@@ -41,12 +46,14 @@ export async function executeActions(
         }
         await deps.session.speak(action.text);
       } else if (action.type === "place_call") {
-        await deps.placer.placeCall(action.person_id, action.script, action.reason);
+        await deps.placer.placeCall(action.person_id, action.script, action.reason, action.to);
       } else {
         log(`unsupported action type for voice: ${(action as { type: string }).type}`);
       }
     } catch (err) {
+      failed += 1;
       log(`action ${action.type} failed: ${String(err)}`);
     }
   }
+  return failed;
 }

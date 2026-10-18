@@ -19,16 +19,16 @@ describe("executeActions", () => {
   it("places calls for place_call actions", async () => {
     const deps = makeDeps();
     await executeActions(
-      [{ type: "place_call", person_id: "p_amit", script: "Are you okay?", reason: "missed_checkin" }],
+      [{ type: "place_call", person_id: "p_amit", to: null, script: "Are you okay?", reason: "missed_checkin" }],
       deps,
     );
-    expect(deps.placer.placeCall).toHaveBeenCalledWith("p_amit", "Are you okay?", "missed_checkin");
+    expect(deps.placer.placeCall).toHaveBeenCalledWith("p_amit", "Are you okay?", "missed_checkin", null);
   });
 
   it("logs and skips send_text", async () => {
     const deps = makeDeps();
     await executeActions(
-      [{ type: "send_text", person_id: "p_amit", text: "x", map_url: null }],
+      [{ type: "send_text", person_id: "p_amit", to: null, text: "x", map_url: null }],
       deps,
     );
     expect(deps.log).toHaveBeenCalled();
@@ -53,10 +53,23 @@ describe("executeActions", () => {
     await executeActions(
       [
         { type: "say", text: "first" },
-        { type: "place_call", person_id: "p_amit", script: "s", reason: "r" },
+        { type: "place_call", person_id: "p_amit", to: null, script: "s", reason: "r" },
       ],
       deps,
     );
     expect(deps.placer.placeCall).toHaveBeenCalled();
+  });
+
+  it("returns how many actions failed", async () => {
+    const deps = makeDeps();
+    deps.placer.placeCall.mockRejectedValueOnce(new Error("down"));
+    const failed = await executeActions(
+      [
+        { type: "place_call", person_id: "p", to: null, script: "s", reason: "r" },
+        { type: "say", text: "ok" },
+      ],
+      deps,
+    );
+    expect(failed).toBe(1);
   });
 });
