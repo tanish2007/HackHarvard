@@ -78,15 +78,30 @@ interface Sender {
 }
 
 /**
- * Longest Core waits for the agent before falling back.
+ * The default for how long Core waits for the agent before falling back.
  *
- * The default is 3200 ms, which leaves time inside Voice's 4 s default wait on
- * /event. The Gemini agent can take longer than that when the model is slow,
- * so set AGENT_TIMEOUT_MS in .env to wait longer. Raise Voice's
- * VOICE_CORE_TIMEOUT_MS above it, so Voice does not give up first. Voice says
- * "One moment" on a call while it waits.
+ * It is 3200 ms, which leaves time inside Voice's 4 s default wait on /event.
+ * See agentTimeoutMs() for how to wait longer.
  */
-export const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS) || 3200;
+export const AGENT_TIMEOUT_MS = 3200;
+
+/**
+ * How long Core waits for the agent before falling back, right now.
+ *
+ * The Gemini agent can take longer than the default when the model is slow,
+ * so AGENT_TIMEOUT_MS in .env raises it. It is read each time, not once at
+ * start, because server.ts loads .env after its imports have run. Raise
+ * Voice's VOICE_CORE_TIMEOUT_MS above it so Voice does not give up first.
+ * Voice says "One moment" on a call while it waits.
+ *
+ * Returns:
+ *     number: The setting in milliseconds, or the 3200 default if it is
+ *         missing or not a positive number.
+ */
+export function agentTimeoutMs(): number {
+  const wanted = Number(process.env.AGENT_TIMEOUT_MS);
+  return Number.isFinite(wanted) && wanted > 0 ? wanted : AGENT_TIMEOUT_MS;
+}
 
 /** Events still being handled, per store, so a redelivery waits for them. */
 const inFlight = new WeakMap<IncidentStore, Map<string, Promise<CoreResponse>>>();
@@ -291,7 +306,7 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       const statusBefore = person?.status;
       try {
         const run = deps.agent({ event, text, person, unit, who: sender.who, signal: controller.signal, sideActions });
-        return await withTimeout(run, AGENT_TIMEOUT_MS, controller);
+        return await withTimeout(run, agentTimeoutMs(), controller);
       } catch (err) {
         console.error(`[core] agent failed for ${event.event_id}:`, err);
         // A tool may already have acted, e.g. set_status sos texted the
