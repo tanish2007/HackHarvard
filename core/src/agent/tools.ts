@@ -160,8 +160,12 @@ export const TOOLS: Tool[] = [
       },
     },
     async run(args, ctx) {
+      // An empty place resolves to the start, so a missing destination
+      // would plan a route from the start to itself.
+      const destination = str(args, "destination");
+      if (!destination) throw new Error("destination is required, e.g. a shelter name or 'nearest shelter'.");
       const from = placeOrThrow(str(args, "origin"), ctx);
-      const to = placeOrThrow(str(args, "destination"), { ...ctx, origin: from });
+      const to = placeOrThrow(destination, { ...ctx, origin: from });
       const route = await ctx.data.getRoute(from.lat, from.lng, to.lat, to.lng);
       return {
         from: from.name,
