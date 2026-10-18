@@ -7,7 +7,7 @@
  */
 import { FunctionCallingConfigMode, GoogleGenAI, type Content, type GenerateContentConfig, type ThinkingLevel } from "@google/genai";
 import type { LlmClient, LlmContent, LlmRequest, LlmResult } from "./llm.js";
-import { withRetry } from "./retry.js";
+import { withFailover } from "./retry.js";
 
 /** Fast and cheap by default. Override with GEMINI_MODEL. */
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
@@ -20,11 +20,15 @@ export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
  *     model (string): Model id, e.g. "gemini-3.5-flash-lite".
  *     thinkingLevel (string | undefined): Optional thinking level, e.g.
  *         "low". Unset leaves the model's default.
+ *     fallbackModels (string[] | undefined): Other models to try, in order,
+ *         when the main one is rate limited or overloaded. Each model has its
+ *         own limit, so these add capacity.
  */
 export interface GeminiOptions {
   apiKey: string;
   model: string;
   thinkingLevel?: string;
+  fallbackModels?: string[];
 }
 
 /**
@@ -34,8 +38,8 @@ export interface GeminiOptions {
  *     options (GeminiOptions): API key, model, and optional thinking level.
  *
  * Returns:
- *     LlmClient: A client whose generate() calls Gemini, retrying a couple of
- *         times if Google is briefly overloaded.
+ *     LlmClient: A client whose generate() calls Gemini, retrying a brief
+ *         overload and moving to a fallback model on a rate limit.
  */
 export function createGeminiClient(options: GeminiOptions): LlmClient {
   const ai = new GoogleGenAI({ apiKey: options.apiKey });
@@ -64,16 +68,18 @@ export function createGeminiClient(options: GeminiOptions): LlmClient {
       };
       if (options.thinkingLevel) config.thinkingConfig = { thinkingLevel: options.thinkingLevel as ThinkingLevel };
 
-      // Google sometimes answers 503 "high demand" for a moment. Try again
-      // quickly instead of sending the caller the fallback line.
-      const res = await withRetry(
-        () =>
+      // A model can answer 503 "high demand" for a moment, or 429 when its own
+      // per-minute limit is used up. Retry a 503 quickly, and on a 429 or a
+      // second failure move on to the next model.
+      const res = await withFailover(
+        [options.model, ...(options.fallbackModels ?? [])],
+        (model) =>
           ai.models.generateContent({
-            model: options.model,
+            model,
             contents: req.contents as Content[],
             config,
           }),
-        { signal: req.signal },
+        { signal: req.signal, retries: 1 },
       );
 
       const content = (res.candidates?.[0]?.content ?? { role: "model", parts: [] }) as LlmContent;
