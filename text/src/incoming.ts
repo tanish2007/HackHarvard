@@ -4,7 +4,7 @@
  * Kept apart from the Photon loop so it can be tested with plain objects.
  */
 import type { Location } from "./contracts.js";
-import { parseCoordinates } from "./location.js";
+import { parseCoordinates, resolveShortLink, type ResolveOptions } from "./location.js";
 
 /** The parts of Photon's message content this module looks at. */
 export interface IncomingContent {
@@ -40,13 +40,13 @@ export type Incoming =
  * Returns:
  *     Incoming: What kind of message it is, and its text and location.
  */
-export async function interpretContent(content: IncomingContent): Promise<Incoming> {
+export async function interpretContent(content: IncomingContent, options: ResolveOptions = {}): Promise<Incoming> {
   switch (content.type) {
     case "text":
-      return { kind: "message", text: content.text ?? "", location: null };
+      return withResolvedLink(content.text ?? "", options);
 
     case "richlink":
-      return content.url ? { kind: "message", text: content.url, location: null } : { kind: "ignore" };
+      return content.url ? withResolvedLink(content.url, options) : { kind: "ignore" };
 
     case "attachment": {
       if (!isLocationCard(content) || !content.read) return { kind: "ignore" };
@@ -65,6 +65,22 @@ export async function interpretContent(content: IncomingContent): Promise<Incomi
     default:
       return { kind: "ignore" };
   }
+}
+
+/**
+ * Treat some text as a message, finding the place behind a short Google Maps
+ * link if it has one. Coordinates already in the text are left for the relay.
+ *
+ * Args:
+ *     text: The message text or link.
+ *     options: Fetch, timeout and redirect limit for following the link.
+ *
+ * Returns:
+ *     Incoming: A message with the text unchanged and the location if found.
+ */
+async function withResolvedLink(text: string, options: ResolveOptions): Promise<Incoming> {
+  const location = parseCoordinates(text) ? null : await resolveShortLink(text, options);
+  return { kind: "message", text, location };
 }
 
 /**

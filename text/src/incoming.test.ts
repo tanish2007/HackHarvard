@@ -64,3 +64,30 @@ test("other custom content, receipts and reactions are ignored", async () => {
   assert.deepEqual(await interpretContent({ type: "read" }), { kind: "ignore" });
   assert.deepEqual(await interpretContent({ type: "reaction" }), { kind: "ignore" });
 });
+
+test("a short Google Maps link in a message gives the message its location", async () => {
+  const short = "https://maps.app.goo.gl/AbCd123";
+  const fetchImpl = (async () =>
+    new Response(null, {
+      status: 302,
+      headers: { location: "https://www.google.com/maps/place/x/@40.7,-74.0,17z" },
+    })) as unknown as typeof fetch;
+  assert.deepEqual(await interpretContent({ type: "text", text: `here ${short}` }, { fetchImpl }), {
+    kind: "message",
+    text: `here ${short}`,
+    location: PIN,
+  });
+  assert.deepEqual(await interpretContent({ type: "richlink", url: short }, { fetchImpl }), {
+    kind: "message",
+    text: short,
+    location: PIN,
+  });
+});
+
+test("a message that already holds coordinates does not trigger a lookup", async () => {
+  const fetchImpl = (async () => {
+    throw new Error("should not be called");
+  }) as unknown as typeof fetch;
+  const text = "https://maps.app.goo.gl/x 40.700, -74.000";
+  assert.deepEqual(await interpretContent({ type: "text", text }, { fetchImpl }), { kind: "message", text, location: null });
+});
