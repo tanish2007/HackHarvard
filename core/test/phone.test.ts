@@ -3,7 +3,7 @@
  * the same person. A miss here signs a known resident up as a stranger.
  */
 import { describe, expect, it } from "vitest";
-import { normalizeHandle } from "../src/lib/phone.js";
+import { handleKey, normalizeHandle } from "../src/lib/phone.js";
 
 describe("normalizeHandle: phone numbers", () => {
   it.each([
@@ -58,5 +58,25 @@ describe("normalizeHandle: matching", () => {
 
   it("keeps different numbers different", () => {
     expect(normalizeHandle("617-555-0101")).not.toBe(normalizeHandle("617-555-0102"));
+  });
+});
+
+describe("handleKey", () => {
+  it("matches normalizeHandle for phone numbers and emails", () => {
+    expect(handleKey("(617) 555-0101")).toBe("+16175550101");
+    expect(handleKey(" Amit@Example.com ")).toBe("amit@example.com");
+  });
+
+  it.each([
+    ["12345", "12345"],
+    [" 12345 ", "12345"],
+    ["RELAY", "relay"],
+    ["+12345", "+12345"],
+  ])("keeps a non-phone sender %j as %j, so it still matches itself", (raw, key) => {
+    expect(handleKey(raw)).toBe(key);
+  });
+
+  it.each(["", "   "])("returns null for a blank handle %j", (raw) => {
+    expect(handleKey(raw)).toBeNull();
   });
 });

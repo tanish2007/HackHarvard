@@ -1,9 +1,10 @@
 /**
- * Tests for distanceKm, which ranks shelters and will decide who is inside
- * the alert radius.
+ * Tests for distanceKm and compassDirection. distanceKm ranks shelters and
+ * decides who is inside the alert radius. compassDirection tells people
+ * which way the fire is.
  */
 import { describe, expect, it } from "vitest";
-import { distanceKm } from "../src/lib/geo.js";
+import { compassDirection, distanceKm } from "../src/lib/geo.js";
 
 const pairs: [string, number, number, number, number][] = [
   ["two demo shelters", 37.87, -122.27, 37.847, -122.258],
@@ -56,5 +57,40 @@ describe("distanceKm", () => {
     const bc = distanceKm(37.86, -122.225, 37.872, -122.205);
     const ac = distanceKm(37.87, -122.27, 37.872, -122.205);
     expect(ac).toBeLessThanOrEqual(ab + bc + 0.01);
+  });
+});
+
+describe("compassDirection", () => {
+  const C = [37.86, -122.225] as const;
+
+  it.each([
+    ["north", 37.9, -122.225],
+    ["northeast", 37.9, -122.174],
+    ["east", 37.86, -122.18],
+    ["southeast", 37.82, -122.174],
+    ["south", 37.82, -122.225],
+    ["southwest", 37.82, -122.276],
+    ["west", 37.86, -122.27],
+    ["northwest", 37.9, -122.276],
+  ])("points %s", (word, lat, lng) => {
+    expect(compassDirection(C[0], C[1], lat, lng)).toBe(word);
+  });
+
+  it("gives the opposite word the other way round", () => {
+    expect(compassDirection(37.872, -122.205, 37.851, -122.224)).toBe("southwest");
+    expect(compassDirection(37.851, -122.224, 37.872, -122.205)).toBe("northeast");
+  });
+
+  it("always returns one of the 8 words", () => {
+    const words = new Set(["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"]);
+    for (let deg = 0; deg < 360; deg += 7) {
+      const lat = C[0] + 0.05 * Math.cos((deg * Math.PI) / 180);
+      const lng = C[1] + 0.05 * Math.sin((deg * Math.PI) / 180);
+      expect(words.has(compassDirection(C[0], C[1], lat, lng))).toBe(true);
+    }
+  });
+
+  it("says north for the same point rather than failing", () => {
+    expect(compassDirection(C[0], C[1], C[0], C[1])).toBe("north");
   });
 });
