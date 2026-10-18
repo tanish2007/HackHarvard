@@ -23,7 +23,7 @@ describe("data stub", () => {
 
   it("returns shelters nearest first with source fake", async () => {
     const shelters = await data.getShelters(AMIT.lat, AMIT.lng);
-    expect(shelters.map((s) => s.id)).toEqual(["sh_a", "sh_c", "sh_b"]);
+    expect(shelters.map((s) => s.id)).toEqual(["sh_hemenway", "sh_a", "sh_c", "sh_b"]);
     expect(shelters.every((s) => s.source === "fake")).toBe(true);
   });
 
