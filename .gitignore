@@ -1,7 +1,7 @@
 prd.md
 claude.md
 
-# Dependencies and build output
+# Dependencies and build output (any folder, including voice/)
 node_modules/
 dist/
 *.log
