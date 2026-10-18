@@ -277,3 +277,74 @@ test("typed coordinates reach Core as the location", async () => {
   await run(deps, "+14134727634", "I'm at 40.700, -74.000 near the bridge");
   assert.deepEqual(events[0]!.location, PIN);
 });
+
+/** A fake Find My feed that records how it was asked. */
+function fakeFindMy(where: typeof PIN | null) {
+  const asked: { handle: string; timeoutMs?: number }[] = [];
+  return {
+    asked,
+    findMy: {
+      latest: async (handle: string, timeoutMs?: number) => {
+        asked.push({ handle, timeoutMs });
+        return where;
+      },
+    },
+  };
+}
+
+test("a new sign-up's Find My location goes to Core", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  const fake = fakeFindMy(PIN);
+  deps.findMy = fake.findMy;
+  await run(deps, "+14134727634", "hello");
+  await run(deps, "+14134727634", "where is the shelter");
+  assert.deepEqual(events[0]!.location, PIN);
+  assert.equal(fake.asked[0]!.handle, "+14134727634");
+});
+
+test("a scenario person keeps their scenario location, not Find My", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  const fake = fakeFindMy(PIN);
+  deps.findMy = fake.findMy;
+  await run(deps, AMIT, "hello");
+  await run(deps, AMIT, "where is the shelter");
+  assert.deepEqual(events[0]!.location, { lat: 37.851, lng: -122.224 });
+  assert.equal(fake.asked.length, 0);
+});
+
+test("Find My can be switched on for scenario people too", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  deps.findMy = fakeFindMy(PIN).findMy;
+  deps.findMyOverridesScenario = true;
+  await run(deps, AMIT, "hello");
+  await run(deps, AMIT, "where is the shelter");
+  assert.deepEqual(events[0]!.location, PIN);
+});
+
+test("a location in the message beats Find My", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  const fake = fakeFindMy({ lat: 1, lng: 2 });
+  deps.findMy = fake.findMy;
+  await run(deps, "+14134727634", "hello");
+  await run(deps, "+14134727634", "I'm at 40.700, -74.000");
+  assert.deepEqual(events[0]!.location, PIN);
+  assert.equal(fake.asked.length, 0);
+});
+
+test("someone not sharing Find My is sent with no location", async () => {
+  const { deps, events } = makeDeps({ actions: [] });
+  deps.findMy = fakeFindMy(null).findMy;
+  await run(deps, "+14134727634", "hello");
+  await run(deps, "+14134727634", "where is the shelter");
+  assert.equal(events[0]!.location, null);
+});
+
+test("a call for help waits only briefly for Find My", async () => {
+  const { deps } = makeDeps({ actions: [] });
+  const fake = fakeFindMy(PIN);
+  deps.findMy = fake.findMy;
+  await run(deps, "+14134727634", "hello");
+  await run(deps, "+14134727634", "SOS");
+  await run(deps, "+14134727634", "where is the shelter");
+  assert.deepEqual(fake.asked.map((a) => a.timeoutMs), [400, 1500]);
+});

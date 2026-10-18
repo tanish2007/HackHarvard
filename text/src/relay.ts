@@ -25,6 +25,10 @@ export interface RelayDeps {
   sosAckDelayMs?: number;
   /** Posts an event to Core. Never throws. */
   postEvent: (event: RelayEvent) => Promise<CoreResponse>;
+  /** Live Find My locations for people who share with the line. Optional. */
+  findMy?: { latest(handle: string, timeoutMs?: number): Promise<Location | null> };
+  /** Use Find My even for people in the scenario. Off by default. */
+  findMyOverridesScenario?: boolean;
   /** Logger for actions this lane cannot carry out. Defaults to console.warn. */
   log?: (msg: string) => void;
   /** Clock, injectable for tests. Defaults to the current time. */
@@ -97,13 +101,22 @@ export async function processText(
   }
 
   const who = deps.directory.resolve(phone);
-  const event = buildEvent(deps, phone, text, location);
+  const distress = isDistress(text);
+
+  // With no location in the message, use their live Find My location if they
+  // share it. Scenario people keep their scenario location unless told
+  // otherwise, so the demo's fire and map stay consistent. A call for help
+  // waits only briefly for it.
+  let where = location;
+  if (!where && deps.findMy && (!who.known || deps.findMyOverridesScenario)) {
+    where = await deps.findMy.latest(phone, distress ? 400 : 1500);
+  }
+  const event = buildEvent(deps, phone, text, where);
 
   // Start the Core call first. Core answers a call for help with its own SOS
   // reply, so ours is only a stopgap: it goes out only if Core is still silent
   // after a couple of seconds, so a person is never left waiting.
   const pending = deps.postEvent(event);
-  const distress = isDistress(text);
   let acknowledged = false;
   if (distress) {
     const early = await firstOf(pending, deps.sosAckDelayMs ?? SOS_ACK_DELAY_MS);
