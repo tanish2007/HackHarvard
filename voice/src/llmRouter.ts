@@ -105,7 +105,9 @@ export function createLlmRouter(deps: LlmRouterDeps): Router {
 
       let reply: string;
       const text = lastUserText(messages);
-      if (!text) {
+      // ElevenLabs sends "..." while the caller is silent. That is not speech,
+      // so it must not reach Core or get an answer.
+      if (!/[\p{L}\p{N}]/u.test(text)) {
         reply = quiet("nothing said");
       } else {
         await handleUtterance(

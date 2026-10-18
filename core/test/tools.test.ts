@@ -88,6 +88,25 @@ describe("lookups", () => {
   });
 });
 
+describe("volunteers", () => {
+  it("registers the offer, shows it on /state, and matches an SOS first", async () => {
+    const { store } = makeStore();
+    store.setStatus("p_priya", "sos");
+    const ctx = toolContext(store, { personId: "v_sam" });
+    await runTool("register_volunteer", { capacity_note: "truck, carries 4" }, ctx);
+    expect(store.snapshot().volunteers.find((v) => v.volunteer_id === "v_sam")).toMatchObject({ capacity_note: "truck, carries 4", status: "available" });
+
+    const out = await runTool("match_volunteer", {}, ctx);
+    expect(out.matched).toMatchObject({ name: "Priya", status: "sos" });
+    expect(store.snapshot().volunteers.find((v) => v.volunteer_id === "v_sam")?.status).toBe("assigned");
+  });
+
+  it("refuses to match before registering", async () => {
+    const { store } = makeStore();
+    expect(await rejection(runTool("match_volunteer", {}, toolContext(store, { personId: "v_sam" })))).toMatch(/register_volunteer/);
+  });
+});
+
 describe("no phone numbers", () => {
   it("never puts a phone number in any tool output", async () => {
     const { store } = makeStore();
@@ -100,6 +119,8 @@ describe("no phone numbers", () => {
       await runTool("get_weather", {}, unit),
       await runTool("get_people_status", {}, unit),
       await runTool("find_person", { name: "a" }, resident),
+      await runTool("register_volunteer", { capacity_note: "truck" }, resident),
+      await runTool("match_volunteer", {}, resident),
       await runTool("set_status", { person_id: "p_amit", status: "sos", reason: "x" }, resident),
     ];
     expect(JSON.stringify(outputs)).not.toMatch(/\+?\d{10,}/);

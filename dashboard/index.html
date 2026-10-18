@@ -3,79 +3,102 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Relay map</title>
+  <title>Relay</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="chrome">
-  <header>
-    <div class="brand-block">
-      <p class="brand">Relay</p>
-      <h1 id="incident-name">Loading incident</h1>
-      <p id="forecast">Loading forecast</p>
-      <p id="forecast-next"></p>
-      <p id="route-note">Loading route</p>
-    </div>
-    <p id="updated"></p>
-    <div class="header-actions">
-      <div class="basemap" role="group" aria-label="Basemap">
-        <button type="button" id="basemap-dark" aria-pressed="true">Dark</button>
-        <button type="button" id="basemap-sat" aria-pressed="false">Satellite</button>
-      </div>
-      <p id="mode" class="live">Live</p>
-    </div>
-  </header>
+  <div id="map"></div>
   <p id="banner" role="status" hidden></p>
-  </div>
-  <div class="layout">
-    <aside class="counts" aria-label="Resident counts">
+  <aside class="sheet" aria-label="Incident">
+    <div class="sheet-top">
+      <div class="sheet-id">
+        <h1 id="incident-name">Incident</h1>
+        <p id="updated">Updated just now</p>
+      </div>
+      <p id="mode" class="live"><span class="live-dot" aria-hidden="true"></span><span class="mode-label">Live</span></p>
+    </div>
+    <p id="forecast" class="ghost" hidden>Loading forecast</p>
+    <p id="forecast-next" class="ghost" hidden></p>
+    <p id="route-note" class="ghost" hidden>Loading route</p>
+    <div class="counts" aria-label="Resident counts">
       <button type="button" class="count safe" data-status="safe" aria-pressed="false">
-        <span id="count-safe">0</span><span class="count-label">Safe</span>
+        <span class="count-value" id="count-safe">0</span>
+        <span class="count-label"><i class="dot" aria-hidden="true"></i>Safe</span>
+        <span class="count-sub" id="count-safe-sub">0% of active roster accounted for</span>
       </button>
       <button type="button" class="count unconfirmed" data-status="unconfirmed" aria-pressed="false">
-        <span id="count-unconfirmed">0</span><span class="count-label">Unconfirmed</span>
+        <span class="count-value" id="count-unconfirmed">0</span>
+        <span class="count-label"><i class="dot" aria-hidden="true"></i>Unconfirmed</span>
+        <span class="count-sub" id="count-unconfirmed-sub">0% of active roster still unconfirmed</span>
       </button>
       <button type="button" class="count sos" data-status="sos" aria-pressed="false">
-        <span id="count-sos">0</span><span class="count-label">SOS</span>
+        <span class="count-value" id="count-sos">0</span>
+        <span class="count-label"><i class="dot" aria-hidden="true"></i>SOS</span>
+        <span class="count-sub" id="count-sos-sub">0% of active roster in distress</span>
       </button>
       <button type="button" class="count en-route" data-status="en_route" aria-pressed="false">
-        <span id="count-en-route">0</span><span class="count-label">En route</span>
+        <span class="count-value" id="count-en-route">0</span>
+        <span class="count-label"><i class="dot" aria-hidden="true"></i>En route</span>
+        <span class="count-sub" id="count-en-route-sub">0% of active roster en route</span>
       </button>
-    </aside>
-    <div class="stage">
-      <main id="map"></main>
+    </div>
+    <div class="sheet-swap">
+      <span class="sheet-grab" aria-hidden="true"></span>
+      <section class="feed" aria-label="Incident log and radio dispatch">
+        <div class="feed-head">
+          <h2>Recent</h2>
+          <p class="feed-count"><span id="feed-count">0</span></p>
+        </div>
+        <ol id="feed"></ol>
+      </section>
       <aside id="drawer" hidden aria-label="Details">
         <div class="drawer-head">
+          <button type="button" id="drawer-back" aria-label="Back">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M15.4 5.4 8.8 12l6.6 6.6-1.4 1.4L6 12l8-8z"/></svg>
+          </button>
           <p id="drawer-status"></p>
-          <button type="button" id="drawer-close">Close</button>
+          <button type="button" id="drawer-close" aria-label="Close">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M18.3 6.7 17.3 5.7 12 11 6.7 5.7 5.7 6.7 11 12l-5.3 5.3 1 1L12 13l5.3 5.3 1-1L13 12z"/></svg>
+          </button>
         </div>
         <h2 id="drawer-title" tabindex="-1"></h2>
         <dl id="drawer-rows"></dl>
+        <div id="drawer-confirm" hidden>
+          <label class="confirm-name" for="confirmed-by">Confirmed by
+            <input id="confirmed-by" name="confirmed-by" maxlength="80" autocomplete="name" placeholder="Responder name">
+          </label>
+          <button type="button" id="confirm-sos">Confirm 911 call</button>
+          <p id="confirm-note" role="status"></p>
+        </div>
       </aside>
-      <div class="map-foot">
-        <label class="window" for="window">
-          Detections
-          <span id="window-label">24h</span>
-          <input id="window" type="range" min="1" max="48" value="24" aria-valuemin="1" aria-valuemax="48">
-        </label>
-        <p id="wind-readout">Wind unavailable</p>
-        <p class="legend" aria-label="Map legend">
-          <span><i class="swatch evacuate"></i>Evacuate now</span>
-          <span><i class="swatch warning"></i>Warning</span>
-          <span><i class="swatch fire"></i>Fire</span>
-          <span><i class="swatch weather"></i>Weather</span>
-          <span><i class="swatch shelter"></i>Shelter</span>
-          <span><i class="route-swatch"></i>Route</span>
-        </p>
+    </div>
+  </aside>
+  <div class="map-tools">
+    <div class="layers">
+      <button type="button" id="layers-toggle" aria-expanded="false" aria-controls="layers-menu" aria-label="Map layers">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3 3 8.2 12 13.4 21 8.2 12 3zm0 12.2L4.2 10.4 3 11.1 12 16.3 21 11.1l-1.2-.7L12 15.2zm0 3.4-7.8-4.8L3 14.5 12 19.7 21 14.5l-1.2-.7L12 18.6z"/></svg>
+      </button>
+      <div id="layers-menu" class="layers-menu" hidden>
+        <button type="button" id="basemap-dark" aria-pressed="true">Map</button>
+        <button type="button" id="basemap-sat" aria-pressed="false">Satellite</button>
       </div>
     </div>
-    <aside class="feed" aria-label="Incident feed">
-      <div class="feed-head">
-        <h2>Incident feed</h2>
-      </div>
-      <ol id="feed"></ol>
-    </aside>
+    <div class="map-foot">
+      <label class="window" for="window">
+        Detections
+        <span id="window-label">24h</span>
+        <input id="window" type="range" min="1" max="48" value="24" aria-valuemin="1" aria-valuemax="48" aria-label="Detections 24h">
+      </label>
+      <p id="wind-readout" class="weather-chip">Weather unavailable</p>
+      <p class="legend" aria-label="Map legend">
+        <span><i class="swatch evacuate"></i>Evacuate now</span>
+        <span><i class="swatch warning"></i>Warning</span>
+        <span><i class="swatch safe"></i>Safe</span>
+        <span><i class="swatch shelter"></i>Shelter</span>
+        <span><i class="route-swatch"></i>Route</span>
+      </p>
+    </div>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>

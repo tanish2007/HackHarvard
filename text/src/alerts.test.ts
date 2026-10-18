@@ -18,6 +18,7 @@ const PRIYA = "+16175550102";
 const alert = (person_id: string, text = "Fire near you. Go to Shelter B."): SendTextAction => ({
   type: "send_text",
   person_id,
+  to: null,
   text,
   map_url: null,
 });
@@ -83,7 +84,40 @@ test("a person without a phone number is skipped", async () => {
   const { deps, sent } = makeDeps();
   const report = await deliverActions(deps, [alert("sim_001")]);
   assert.equal(sent.length, 0);
-  assert.equal(report.skipped[0]!.reason, "no phone number in the scenario");
+  assert.equal(report.skipped[0]!.reason, "no phone number in the scenario or on the action");
+});
+
+test("someone who signed up by text is reached through the action's `to`", async () => {
+  const { deps, sent } = makeDeps();
+  const newcomer = "+14134727634";
+  deps.registry.optIn(newcomer);
+  const report = await deliverActions(deps, [{ ...alert("p_7634"), to: newcomer }]);
+  assert.deepEqual(sent, [{ phone: newcomer, text: "Fire near you. Go to Shelter B." }]);
+  assert.deepEqual(report.delivered, ["p_7634"]);
+});
+
+test("`to` works as an iMessage email and in any format", async () => {
+  const { deps, sent } = makeDeps();
+  deps.registry.optIn("sam@example.com");
+  deps.registry.optIn("+14134727634");
+  await deliverActions(deps, [
+    { ...alert("p_sam"), to: "Sam@Example.com" },
+    { ...alert("p_7634"), to: "(413) 472-7634" },
+  ]);
+  assert.deepEqual(sent.map((s) => s.phone).sort(), ["+14134727634", "sam@example.com"]);
+});
+
+test("a scenario number wins over `to`", async () => {
+  const { deps, sent } = makeDeps();
+  await deliverActions(deps, [{ ...alert("p_amit"), to: "+19998887777" }]);
+  assert.equal(sent[0]!.phone, AMIT);
+});
+
+test("`to` for someone who never opted in is still skipped", async () => {
+  const { deps, sent } = makeDeps();
+  const report = await deliverActions(deps, [{ ...alert("p_7634"), to: "+14134727634" }]);
+  assert.equal(sent.length, 0);
+  assert.equal(report.skipped[0]!.reason, "not opted in");
 });
 
 test("a failed send is reported and does not stop the others", async () => {
@@ -99,7 +133,7 @@ test("a failed send is reported and does not stop the others", async () => {
 
 test("actions that are not send_text are ignored", async () => {
   const { deps, sent, logs } = makeDeps();
-  const call = { type: "place_call" as const, person_id: "p_amit", script: "hi", reason: "x" };
+  const call = { type: "place_call" as const, person_id: "p_amit", to: null, script: "hi", reason: "x" };
   const report = await deliverActions(deps, [call]);
   assert.equal(sent.length, 0);
   assert.deepEqual(report, { delivered: [], skipped: [] });

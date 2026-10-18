@@ -40,6 +40,23 @@ export interface Classification {
   text: string;
 }
 
+/**
+ * Compose each string to NFC, so a phrase typed with a precomposed letter
+ * matches text that normalize("NFC") has turned into base letter plus mark.
+ *
+ * Devanagari needs this: ज़ (a precomposed letter) becomes ज plus a nukta in
+ * NFC, and the phrase lists must be in that same form to match.
+ *
+ * Args:
+ *     phrases (string[]): Phrases as written in the source.
+ *
+ * Returns:
+ *     string[]: The same phrases in NFC.
+ */
+function nfc(phrases: string[]): string[] {
+  return phrases.map((p) => p.normalize("NFC"));
+}
+
 const STOP_WORDS = new Set(["stop", "stop alerts", "unsubscribe", "cancel", "quit", "end"]);
 
 /** Short answers that mean "safe" only on a check-in call ("Are you safe?"). */
@@ -114,9 +131,16 @@ const SCRIPT_SOS = [
   "મદદ કરો", "મને મદદ", "અમને મદદ", "મદદની જરૂર", "મદદ જોઈએ", "મદદ જોઇએ", "બચાવો",
   "ફસાઈ", "ફસાય", "ઘાયલ", "ઇજા", "ઈજા", "ઇમરજન્સી", "ઈમરજન્સી", "કટોકટી",
   "સુરક્ષિત નથી", "સલામત નથી", "અસુરક્ષિત",
+  // Hindi
+  ...nfc([
+    "मदद करो", "मदद कीजिए", "मदद कीजिये", "मुझे मदद", "हमें मदद", "हमको मदद", "मदद चाहिए",
+    "मदद चाहिये", "मदद की ज़रूरत", "मदद की जरूरत", "सहायता चाहिए", "सहायता करो", "बचाओ",
+    "बचाइए", "फंस", "फँस", "घायल", "आपातकाल", "इमरजेंसी", "एमरजेंसी", "सुरक्षित नहीं",
+    "असुरक्षित",
+  ]),
 ];
 
-/** Chinese and Gujarati safe phrases, matched as substrings. */
+/** Chinese, Gujarati and Hindi safe phrases, matched as substrings. */
 const SCRIPT_SAFE = [
   // Chinese
   // Whole phrases only: a bare 我安全 would match 给我安全的路线 (give me a safe route).
@@ -125,16 +149,24 @@ const SCRIPT_SAFE = [
   "我平安", "我们平安", "已经安全", "我在避难所", "我们在避难所", "到避难所了",
   // Gujarati
   "સુરક્ષિત છું", "સુરક્ષિત છીએ", "સલામત છું", "સલામત છીએ", "ઠીક છું", "ઠીક છીએ",
+  // Hindi
+  ...nfc([
+    "सुरक्षित हूँ", "सुरक्षित हूं", "सुरक्षित हैं", "सलामत हूँ", "सलामत हूं", "सलामत हैं",
+    "ठीक हूँ", "ठीक हूं", "ठीक हैं", "सब ठीक है",
+  ]),
 ];
 
 /** Whole messages that are an SOS on their own, like English "help". */
-const SCRIPT_SOS_EXACT = new Set(["帮助", "帮忙", "帮我", "મદદ", "બચાવ"]);
+const SCRIPT_SOS_EXACT = new Set(["帮助", "帮忙", "帮我", "મદદ", "બચાવ", ...nfc(["मदद", "बचाओ", "सहायता"])]);
 
 /** Whole messages that mean safe on their own, like English "safe". */
-const SCRIPT_SAFE_EXACT = new Set(["安全", "平安", "સુરક્ષિત", "સલામત"]);
+const SCRIPT_SAFE_EXACT = new Set(["安全", "平安", "સુરક્ષિત", "સલામત", ...nfc(["सुरक्षित", "सलामत"])]);
 
-/** Chinese and Gujarati spoken yes on a check-in call, like SPOKEN_YES. */
-const SCRIPT_SPOKEN_YES = new Set(["是", "是的", "对", "હા", "હા જી"]);
+/** Chinese, Gujarati and Hindi spoken yes on a check-in call, like SPOKEN_YES. */
+const SCRIPT_SPOKEN_YES = new Set([
+  "是", "是的", "对", "હા", "હા જી",
+  ...nfc(["हाँ", "हां", "हाँ जी", "हां जी", "जी हाँ", "जी हां", "जी", "ठीक है"]),
+]);
 
 /** Chinese negation characters, checked just before a keyword: 不需要帮助, 没人受伤. */
 const ZH_NEGATOR = /[不没無无别未非]/;
@@ -142,11 +174,20 @@ const ZH_NEGATOR = /[不没無无别未非]/;
 /** Gujarati negation words, checked around a keyword: મદદની જરૂર નથી. */
 const GU_NEGATORS = new Set(["નથી", "નહીં", "નહિ", "ના", "ન"]);
 
+/** Hindi negation words, checked around a keyword: मदद की ज़रूरत नहीं है. */
+const HI_NEGATORS = new Set(nfc(["नहीं", "नही", "ना", "न", "बिना", "कोई नहीं"]));
+
+/** Negation words for every script language that is matched by phrase. */
+const SCRIPT_NEGATORS = new Set([...GU_NEGATORS, ...HI_NEGATORS]);
+
 /** Chinese words that make a clause a question: 吗, 哪里, 有没有. */
 const ZH_QUESTION = /(吗|是否|有没有|哪里|哪儿|什么|能不能|呢$)/;
 
 /** Gujarati question words: શું (yes/no), ક્યાં (where), ક્યારે (when), કોણ (who), કેમ (why). */
 const GU_QUESTION_WORDS = new Set(["શું", "ક્યાં", "ક્યારે", "કોણ", "કેમ"]);
+
+/** Hindi question words: क्या (yes/no), कहाँ (where), कब (when), कौन (who), क्यों (why), कैसे (how). */
+const HI_QUESTION_WORDS = new Set(nfc(["क्या", "कहाँ", "कहां", "कब", "कौन", "क्यों", "कैसे", "कितना", "कितनी"]));
 
 /** Words that negate a keyword right after them: "not injured", "no emergency". */
 const NEGATORS = new Set([
@@ -192,7 +233,7 @@ function normalize(text: string): string {
 }
 
 /**
- * Normalize text for the Chinese and Gujarati phrase lists.
+ * Normalize text for the Chinese, Gujarati and Hindi phrase lists.
  *
  * Like normalize(), but keeps combining marks, which Gujarati vowel signs
  * are (normalize() would turn "છું" into "છ"), and composes the text first
@@ -251,7 +292,7 @@ function clauses(raw: string): Clause[] {
         /[?？]\s*$/.test(piece) ||
         QUESTION_WORDS.has(first) ||
         ZH_QUESTION.test(script) ||
-        words.some((w) => GU_QUESTION_WORDS.has(w));
+        words.some((w) => GU_QUESTION_WORDS.has(w) || HI_QUESTION_WORDS.has(w));
       return { text, script, question };
     })
     .filter((c) => c.text.length > 0 || c.script.length > 0);
@@ -334,7 +375,7 @@ function isScriptNegated(clause: string, start: number, end: number): boolean {
   if (ZH_NEGATOR.test(clause.slice(Math.max(0, start - NEGATION_WINDOW), start))) return true;
   const before = clause.slice(0, start).trim().split(" ").filter(Boolean).slice(-NEGATION_WINDOW);
   const after = clause.slice(end).trim().split(" ").filter(Boolean).slice(0, NEGATION_WINDOW);
-  return [...before, ...after].some((w) => GU_NEGATORS.has(w));
+  return [...before, ...after].some((w) => SCRIPT_NEGATORS.has(w));
 }
 
 /**

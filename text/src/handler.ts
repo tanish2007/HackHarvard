@@ -13,6 +13,11 @@ export const WELCOME =
 export const GOODBYE = "You've been removed from Relay. Text JOIN to sign up again.";
 export const NOT_SIGNED_UP = "You're not signed up for Relay. Text JOIN to get wildfire alerts.";
 export const ACKNOWLEDGED = "Relay got your message.";
+export const LOCATION_HINT =
+  "I can't read that kind of shared location. Send a pin from the Maps app, or text your street address.";
+export const LOCATING_NOTE =
+  "Thanks, I can see you're sharing your location. It can take a minute to come through. " +
+  "If it doesn't, text your street address.";
 export const SOS_RECEIVED =
   "SOS received. I'm flagging this for responders now. " +
   "If you are in immediate danger, call 911.";

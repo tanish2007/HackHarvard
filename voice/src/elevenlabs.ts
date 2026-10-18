@@ -21,6 +21,12 @@ export interface ElevenLabsConfig {
   baseUrl?: string;
   /** Map a Contract E person id to an E.164 phone number, or null. */
   resolveNumber: (personId: string) => string | null;
+  /**
+   * Find the language to run the call in, as an ElevenLabs language code
+   * such as "hi", or null to use the agent's default. The agent must have
+   * that language added and the language override allowed.
+   */
+  languageOf?: (personId: string) => Promise<string | null>;
   /** Fetch implementation, injectable for tests. */
   fetchImpl?: typeof fetch;
   /** Request timeout in milliseconds. Defaults to 10000. */
@@ -48,6 +54,8 @@ export class ElevenLabsPlacer implements CallPlacer {
    *   toNumber: The number Core supplied, if any. Takes priority over the
    *     scenario lookup.
    *
+   * The call runs in the person's language when `languageOf` finds one.
+   *
    * Raises:
    *   Error: If no number is known for the person, or ElevenLabs rejects
    *     the request.
@@ -61,6 +69,7 @@ export class ElevenLabsPlacer implements CallPlacer {
     const to = toNumber ?? this.config.resolveNumber(personId);
     if (!to) throw new Error(`no phone number for ${personId}`);
 
+    const language = (await this.config.languageOf?.(personId)) ?? null;
     const doFetch = this.config.fetchImpl ?? fetch;
     const res = await doFetch(`${this.config.baseUrl ?? "https://api.elevenlabs.io"}${OUTBOUND_PATH}`, {
       method: "POST",
@@ -70,7 +79,9 @@ export class ElevenLabsPlacer implements CallPlacer {
         agent_phone_number_id: this.config.phoneNumberId,
         to_number: to,
         conversation_initiation_client_data: {
-          conversation_config_override: { agent: { first_message: script } },
+          conversation_config_override: {
+            agent: { first_message: script, ...(language ? { language } : {}) },
+          },
           dynamic_variables: { person_id: personId, caller_number: to, reason },
         },
       }),

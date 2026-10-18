@@ -31,10 +31,17 @@ export interface RelayEvent {
   timestamp: string;
 }
 
-/** Contract B: send a text to a person. Carried out by this lane. */
+/**
+ * Contract B: send a text to a person. Carried out by this lane.
+ *
+ * `to` is the person's phone number or iMessage email. Core fills it in for
+ * people who signed up by text and are not in scenario.json, so this lane has
+ * no other way to find them. It may be null for scenario people.
+ */
 export interface SendTextAction {
   type: "send_text";
   person_id: string;
+  to: string | null;
   text: string;
   map_url: string | null;
 }
@@ -43,6 +50,7 @@ export interface SendTextAction {
 export interface PlaceCallAction {
   type: "place_call";
   person_id: string;
+  to: string | null;
   script: string;
   reason: string;
 }

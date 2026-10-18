@@ -24,6 +24,9 @@ const MAX_NAMES = 10;
 /** A person counts as at a shelter within this distance of it. */
 const AT_SHELTER_KM = 0.3;
 
+/** Farthest a volunteer is sent to someone who needs help, in km. */
+const MATCH_RADIUS_KM = 5;
+
 /**
  * Everything a tool needs for one agent run.
  *
@@ -270,6 +273,69 @@ export const TOOLS: Tool[] = [
           }
           return { person_id: p.person_id, name: p.name, status: p.status, zone: zoneName(ctx, p.zone), at_shelter: atShelter, last_contact: p.last_contact };
         }),
+      };
+    },
+  },
+  {
+    declaration: {
+      name: "register_volunteer",
+      description:
+        "Sign the sender up as a volunteer when they offer help, a vehicle, or seats ('I have a truck and can carry 4'). Then call match_volunteer.",
+      parameters: {
+        type: "object",
+        properties: {
+          capacity_note: { type: "string", description: "What they offer in a few words, e.g. 'truck, carries 4'." },
+        },
+        required: ["capacity_note"],
+      },
+    },
+    async run(args, ctx) {
+      const note = str(args, "capacity_note");
+      if (!note) throw new Error("capacity_note is required, e.g. 'truck, carries 4'.");
+      const me = ctx.person;
+      if (!me) throw new Error("Only a person texting Relay can volunteer.");
+      ctx.store.registerVolunteer(me.person_id, note);
+      ctx.store.addTimeline({ channel: "system", who: "Relay", text: `${me.name} volunteered: ${note}` });
+      return { name: me.name, capacity_note: note, location_known: me.lat !== null };
+    },
+  },
+  {
+    declaration: {
+      name: "match_volunteer",
+      description:
+        "Find the nearest resident who still needs help for the sender, after register_volunteer. People in SOS come first. Use plan_route to that person for directions.",
+      parameters: { type: "object", properties: {} },
+    },
+    async run(_args, ctx) {
+      const me = ctx.person;
+      const offer = me ? ctx.store.getOffer(me.person_id) : undefined;
+      if (!me || !offer) throw new Error("Call register_volunteer first.");
+      if (me.lat === null || me.lng === null) return { matched: null, reason: "Ask them to share their location first." };
+      const { lat, lng } = me;
+      const needs = ctx.store
+        .listPeople()
+        .filter((p) => p.role === "resident" && p.person_id !== me.person_id && p.lat !== null && p.lng !== null)
+        .filter((p) => p.status === "sos" || p.status === "unconfirmed")
+        .map((p) => ({ p, km: distanceKm(lat, lng, p.lat!, p.lng!) }))
+        .filter((x) => x.km <= MATCH_RADIUS_KM)
+        .sort((a, b) => Number(b.p.status === "sos") - Number(a.p.status === "sos") || a.km - b.km);
+      const best = needs[0];
+      if (!best) return { matched: null, reason: `Nobody needs help within ${MATCH_RADIUS_KM} km right now.` };
+      ctx.store.assignVolunteer(me.person_id, best.p.person_id);
+      ctx.store.addTimeline({
+        channel: "system",
+        who: "Relay",
+        text: `${me.name} (${offer.capacity_note}) matched to ${best.p.name} (${best.p.status}), ${best.km.toFixed(1)} km away`,
+      });
+      return {
+        matched: {
+          name: best.p.name,
+          status: best.p.status,
+          zone: zoneName(ctx, best.p.zone),
+          distance_km: Math.round(best.km * 10) / 10,
+          direction: compassDirection(lat, lng, best.p.lat!, best.p.lng!),
+        },
+        note: "Tell the volunteer to stay out of the fire area and follow responders' instructions.",
       };
     },
   },
