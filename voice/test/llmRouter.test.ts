@@ -94,6 +94,21 @@ describe("custom LLM endpoint", () => {
     expect(sentEvent(fetchImpl).person_id).toBeNull();
   });
 
+  it("treats a bare ellipsis as silence and does not call Core", async () => {
+    const { app, fetchImpl } = build();
+    for (const text of ["...", "…", " . . ", "?"]) {
+      const res = await request(app).post(PATH).send(body(text, { tools: [SKIP_TOOL] }));
+      expect(res.text).toContain("skip_turn");
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("still forwards short real speech", async () => {
+    const { app, fetchImpl } = build();
+    await request(app).post(PATH).send(body("ok"));
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("does not call Core when nothing was said", async () => {
     const { app, fetchImpl } = build();
     await request(app).post(PATH).send({ model: "relay", messages: [{ role: "system", content: "x" }] });
