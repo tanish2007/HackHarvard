@@ -95,6 +95,18 @@ export interface StatusResult {
 }
 
 /**
+ * What a volunteer offered, and who they were matched to.
+ *
+ * Attributes:
+ *     capacity_note (string): Their offer, e.g. "truck, carries 4".
+ *     assigned_to (string | null): person_id they were matched to, if any.
+ */
+export interface VolunteerOffer {
+  capacity_note: string;
+  assigned_to: string | null;
+}
+
+/**
  * In-memory state for the incident.
  *
  * Attributes:
@@ -112,6 +124,7 @@ export class IncidentStore {
   private optedOut = new Map<string, TrackedPerson>();
   private sosAt = new Map<string, string>();
   private lastText = new Map<string, string>();
+  private offers = new Map<string, VolunteerOffer>();
   private newPeopleCount = 0;
   private updatedAt = "";
 
@@ -181,8 +194,63 @@ export class IncidentStore {
     this.optedOut = new Map();
     this.sosAt = new Map(this.scenario.people.filter((p) => p.initial_status === "sos").map((p) => [p.person_id, at]));
     this.lastText = new Map();
+    this.offers = new Map();
     this.newPeopleCount = 0;
     this.updatedAt = at;
+  }
+
+  /**
+   * Record what a person offers as a volunteer, e.g. "truck, carries 4".
+   *
+   * Makes them a volunteer, so the map shows them with their offer instead
+   * of as a resident. A new offer replaces the old one and frees them up.
+   *
+   * Args:
+   *     personId (string): Who is offering.
+   *     capacityNote (string): What they offer, in a few words.
+   *
+   * Returns:
+   *     boolean: False if the person is unknown.
+   */
+  registerVolunteer(personId: string, capacityNote: string): boolean {
+    const p = this.people.get(personId);
+    if (!p) return false;
+    p.role = "volunteer";
+    this.offers.set(personId, { capacity_note: capacityNote.trim().slice(0, 80), assigned_to: null });
+    this.touch();
+    return true;
+  }
+
+  /**
+   * Note that a volunteer was matched to someone who needs help.
+   *
+   * Args:
+   *     volunteerId (string): The volunteer.
+   *     personId (string): Who they were matched to.
+   *
+   * Returns:
+   *     boolean: False if the volunteer has no offer on record.
+   */
+  assignVolunteer(volunteerId: string, personId: string): boolean {
+    const offer = this.offers.get(volunteerId);
+    if (!offer) return false;
+    offer.assigned_to = personId;
+    this.touch();
+    return true;
+  }
+
+  /**
+   * What a volunteer offered, if they registered.
+   *
+   * Args:
+   *     personId (string): The volunteer.
+   *
+   * Returns:
+   *     VolunteerOffer | undefined: A copy, or undefined if they never did.
+   */
+  getOffer(personId: string): VolunteerOffer | undefined {
+    const offer = this.offers.get(personId);
+    return offer ? { ...offer } : undefined;
   }
 
   /**
@@ -550,13 +618,14 @@ export class IncidentStore {
       if (!asVolunteer) counts[p.status]++;
       if (p.lat === null || p.lng === null) continue;
       if (asVolunteer) {
+        const offer = this.offers.get(p.person_id);
         volunteers.push({
           volunteer_id: p.person_id,
           name: p.name,
           lat: p.lat,
           lng: p.lng,
-          capacity_note: "",
-          status: "available",
+          capacity_note: offer?.capacity_note ?? "",
+          status: offer?.assigned_to ? "assigned" : "available",
         });
       } else {
         residents.push({
