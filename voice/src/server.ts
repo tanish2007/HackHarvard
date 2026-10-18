@@ -10,6 +10,7 @@ import express from "express";
 import { actionsErrorHandler } from "./errors.js";
 import { createActionsRouter } from "./actionsRouter.js";
 import { ElevenLabsPlacer } from "./elevenlabs.js";
+import { fetchPersonLanguage } from "./personLanguage.js";
 import { createLlmRouter } from "./llmRouter.js";
 
 /**
@@ -30,12 +31,23 @@ function need(name: string): string {
   return v;
 }
 
+const coreUrl = process.env.CORE_URL ?? "http://localhost:3000";
+// Languages the ElevenLabs agent has been set up for. A person in any other
+// language, and English speakers, get the agent's default language.
+const callLanguages = new Set(
+  (process.env.ELEVENLABS_LANGUAGES ?? "es,gu,hi").split(",").map((l) => l.trim().toLowerCase()).filter(Boolean),
+);
+
 const placer = new ElevenLabsPlacer({
   apiKey: need("ELEVENLABS_API_KEY"),
   agentId: need("ELEVENLABS_AGENT_ID"),
   phoneNumberId: need("ELEVENLABS_PHONE_NUMBER_ID"),
   // Core always supplies `to` for check-in calls. Anyone else is unknown here.
   resolveNumber: () => null,
+  languageOf: async (personId) => {
+    const lang = (await fetchPersonLanguage(personId, { coreUrl }))?.split(/[-_]/)[0].toLowerCase();
+    return lang && callLanguages.has(lang) ? lang : null;
+  },
 });
 
 const app = express();
@@ -43,7 +55,7 @@ app.use(createActionsRouter({ placer }));
 app.use(
   createLlmRouter({
     secret: need("VOICE_LLM_SECRET"),
-    coreUrl: process.env.CORE_URL ?? "http://localhost:3000",
+    coreUrl,
     placer,
   }),
 );
