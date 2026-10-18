@@ -3,8 +3,8 @@
  *
  * POST /event (Contract A in, Contract B out), GET /state (Contract D),
  * GET /health, POST /escalations/:person_id/confirm (the dashboard's "call
- * 911" button), and the local demo controls POST /admin/alert and
- * POST /admin/reset.
+ * 911" button), and the local demo controls POST /admin/alert,
+ * POST /admin/clear-fire, and POST /admin/reset.
  */
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
@@ -192,6 +192,14 @@ export function createCoreRouter(deps: CoreDeps): Router {
       res.json(await deps.watcher.runOnce());
     }),
   );
+
+  // Take the staged fire off the map. People, texts, and the timeline stay.
+  // Resetting the watcher lets the next alert text the same residents again.
+  router.post("/admin/clear-fire", (_req, res) => {
+    deps.watcher?.reset();
+    deps.store.setHazards([]);
+    res.json({ ok: true });
+  });
 
   // Back to the scenario's starting state, so the demo can run twice in a row.
   router.post("/admin/reset", (_req, res) => {
