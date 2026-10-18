@@ -1,0 +1,4 @@
+latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,confidence,frp
+37.721,-122.451,320.5,0.4,0.4,2026-10-17,1402,N,high,15.2
+37.725,-122.448,310.1,0.4,0.4,2026-10-17,1402,N,nominal,8.1
+37.800,-122.400,300.0,0.4,0.4,2026-10-17,1300,N,low,2.0
