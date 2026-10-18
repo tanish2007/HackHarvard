@@ -30,7 +30,8 @@ export async function publishFindMyLocation(deps: RelayDeps, phone: string, loca
   if (!deps.findMyOverridesScenario) return false;
   const who = deps.directory.resolve(phone);
   if (!who.known) return false;
-  const key = `${location.lat.toFixed(4)},${location.lng.toFixed(4)}`;
+  // About one meter. A coarser key was hiding a person walking down the block.
+  const key = `${location.lat.toFixed(5)},${location.lng.toFixed(5)}`;
   if (sent.get(who.person_id) === key) return false;
   sent.set(who.person_id, key);
   await deps.postEvent({
@@ -48,8 +49,9 @@ export async function publishFindMyLocation(deps: RelayDeps, phone: string, loca
 }
 
 /**
- * Look up every scenario phone on the live feed and send the points Core
- * does not have yet.
+ * Ask the live feed again for every scenario phone and send Core any point
+ * it does not have yet. A fresh ask is used so a recent memory does not
+ * hide a move.
  *
  * Args:
  *     deps: The tracker, the directory, and the Core poster.
@@ -57,7 +59,14 @@ export async function publishFindMyLocation(deps: RelayDeps, phone: string, loca
 export async function sweepFindMy(deps: RelayDeps): Promise<void> {
   if (!deps.findMy || !deps.findMyOverridesScenario) return;
   for (const phone of deps.directory.phones()) {
-    const location = await deps.findMy.latest(phone, 5000);
-    if (location) await publishFindMyLocation(deps, phone, location);
+    const location = await (deps.findMy.ask ?? deps.findMy.latest).call(deps.findMy, phone, 5000);
+    // Forget the last send so a restarted Core, which lost the live point,
+    // hears this fix again. publishFindMyLocation still skips a point it
+    // just posted from the live feed.
+    if (location) {
+      const who = deps.directory.resolve(phone);
+      if (who.known) sent.delete(who.person_id);
+      await publishFindMyLocation(deps, phone, location);
+    }
   }
 }

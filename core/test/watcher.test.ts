@@ -37,10 +37,10 @@ function setup(data: Partial<DataTools> = {}) {
 describe("runOnce", () => {
   it("texts reachable residents near the fire and starts their check-ins", async () => {
     const { watcher, pushed, started } = setup();
-    expect(await watcher.runOnce()).toEqual({ alerted: 2, person_ids: ["p_amit", "p_priya"], hazards: 1 });
-    expect(pushed.map((a) => (a as SendTextAction).to)).toEqual([PHONES.amit, PHONES.priya]);
+    expect(await watcher.runOnce()).toEqual({ alerted: 1, person_ids: ["p_amit"], hazards: 2 });
+    expect(pushed.map((a) => (a as SendTextAction).to)).toEqual([PHONES.amit]);
     expect((pushed[0] as SendTextAction).text).toMatch(/Nearest shelter: Hemenway Gym/);
-    expect(started).toEqual(["p_amit", "p_priya"]);
+    expect(started).toEqual(["p_amit"]);
   });
 
   it("skips volunteers, simulated people, and people far from the fire", async () => {
@@ -53,17 +53,17 @@ describe("runOnce", () => {
   it("alerts each person once per fire, even if runs overlap, until reset", async () => {
     const { watcher, pushed } = setup();
     const [a, b] = await Promise.all([watcher.runOnce(), watcher.runOnce()]);
-    expect(a.alerted + b.alerted).toBe(2);
+    expect(a.alerted + b.alerted).toBe(1);
     expect((await watcher.runOnce()).alerted).toBe(0);
     watcher.reset();
-    expect((await watcher.runOnce()).alerted).toBe(2);
-    expect(pushed).toHaveLength(4);
+    expect((await watcher.runOnce()).alerted).toBe(1);
+    expect(pushed).toHaveLength(2);
   });
 
   it("puts the hazards on /state", async () => {
     const { store, watcher } = setup();
     await watcher.runOnce();
-    expect(store.snapshot().hazards).toEqual([expect.objectContaining({ id: "hz_scenario_fire", source: "fake" })]);
+    expect(store.snapshot().hazards.map((hazard) => hazard.id).sort()).toEqual(["hz_mount_ida", "hz_scenario_fire"]);
   });
 
   it("keeps the last hazards and never throws when get_hazards fails", async () => {
@@ -83,13 +83,14 @@ describe("runOnce", () => {
         throw new Error("down");
       },
     });
-    expect((await watcher.runOnce()).alerted).toBe(2);
+    expect((await watcher.runOnce()).alerted).toBe(1);
   });
 });
 
 describe("alert details", () => {
-  it("sends Priya her fire alert in Gujarati", async () => {
-    const { watcher, pushed } = setup();
+  it("sends Priya her fire alert in Gujarati when she is near the fire", async () => {
+    const { store, watcher, pushed } = setup();
+    store.recordContact("p_priya", { lat: 42.3776, lng: -71.115 });
     await watcher.runOnce();
     const alert = pushed.find((a) => "person_id" in a && a.person_id === "p_priya");
     expect(alert && "text" in alert ? alert.text : "").toMatch(/\p{Script=Gujarati}/u);
@@ -115,7 +116,7 @@ describe("the same fire with a new id", () => {
 
   it("does not re-alert for a new id less than 1 km away", async () => {
     const { watcher, move } = movingFire();
-    expect((await watcher.runOnce()).alerted).toBe(2);
+    expect((await watcher.runOnce()).alerted).toBe(1);
     move("f2", 0.005); // about 0.56 km north
     expect((await watcher.runOnce()).alerted).toBe(0);
   });
@@ -124,7 +125,7 @@ describe("the same fire with a new id", () => {
     const { watcher, move } = movingFire();
     await watcher.runOnce();
     move("f3", -0.015); // about 1.7 km south, still inside the alert radius
-    expect((await watcher.runOnce()).alerted).toBe(2);
+    expect((await watcher.runOnce()).alerted).toBe(1);
   });
 });
 

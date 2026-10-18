@@ -21,7 +21,16 @@ const ZONE_STYLE = {
 const LANGUAGE_NAME = { en: "English", es: "Spanish", zh: "Chinese", gu: "Gujarati" };
 const CHANNEL_NAME = { imessage: "iMessage", sms: "SMS", voice: "Voice", radio: "Radio" };
 
-const picture = { zones: [], fire: null, wind: null, phones: {}, center: null, units: [] };
+const picture = {
+  zones: [],
+  fire: null,
+  wind: null,
+  phones: {},
+  center: null,
+  units: [],
+  checkinSec: 60,
+  escalationSec: 60,
+};
 let map = null;
 let tiles = null;
 let activeBasemap = "dark";
@@ -199,6 +208,8 @@ function weatherChip(wind) {
   return mphText + " mph from " + wind.wind_dir + " · " + temp + "°F · " + source;
 }
 
+const SPREAD_SCALE = 1.65;
+
 function organicRing(lat, lng, radiusKm) {
   const steps = 72;
   const ring = [];
@@ -275,6 +286,94 @@ function drawnHazards(state) {
   return (state.hazards || []).filter((hazard) => hazard && hazard.kind === "fire" && hazard.source !== "scenario");
 }
 
+// Next call in a person's check-in chain, read from timeline lines Core already writes.
+function chainClocks(state) {
+  const checkinSec = picture.checkinSec;
+  const escalationSec = picture.escalationSec;
+  const timeline = (Array.isArray(state.timeline) ? state.timeline : [])
+    .filter((entry) => entry && entry.at && entry.text)
+    .slice()
+    .sort((a, b) => a.at.localeCompare(b.at));
+  const names = (state.people || [])
+    .filter((person) => person && person.name && person.person_id && !String(person.person_id).startsWith("sim_"))
+    .map((person) => person.name);
+  const clocks = [];
+  names.forEach((name) => {
+    const alerts = timeline.filter((entry) => entry.text.startsWith("Fire alert sent to " + name + " ("));
+    if (!alerts.length) return;
+    const start = alerts[alerts.length - 1].at;
+    const after = timeline.filter((entry) => entry.at >= start);
+    if (after.some((entry) => entry.text === name + " got in touch, check-in stopped")) return;
+    if (after.some((entry) => entry.text.startsWith(name + " unreachable after "))) {
+      clocks.push({ label: "Press Confirm 911 call for " + name });
+      return;
+    }
+    const checkin = after.find((entry) =>
+      entry.text.startsWith("Calling " + name + ":") ||
+      entry.text === name + " has no phone number to call, skipping the check-in call");
+    if (!checkin) {
+      clocks.push({
+        at: Date.parse(start) + checkinSec * 1000,
+        label: "until " + name + " is called",
+        now: "Calling " + name,
+      });
+      return;
+    }
+    const family = after.find((entry) => {
+      if (entry.at < checkin.at) return false;
+      if (entry.text === name + " has no family contact Relay can call") return true;
+      return entry.text.startsWith("Calling ") && !entry.text.startsWith("Calling " + name + ":") && entry.text.includes(name);
+    });
+    if (!family) {
+      if (after.some((entry) => entry.text === name + " picked up the check-in call")) return;
+      clocks.push({
+        at: Date.parse(checkin.at) + escalationSec * 1000,
+        label: "until the family call",
+        now: "Calling family",
+      });
+      return;
+    }
+    if (after.some((entry) => entry.text.startsWith("Calling Unit 4"))) return;
+    const firefighter = after.find((entry) => entry.text.includes("firefighter call for " + name));
+    if (!firefighter) return;
+    clocks.push({
+      at: Date.parse(firefighter.at) + escalationSec * 1000,
+      label: "until the firefighter call for " + name,
+      now: "Calling the firefighter",
+    });
+  });
+  return clocks;
+}
+
+function paintCallCountdown() {
+  const el = document.getElementById("call-countdown");
+  if (!el) return;
+  const clocks = lastState ? chainClocks(lastState) : [];
+  if (!clocks.length) {
+    el.hidden = true;
+    el.replaceChildren();
+    return;
+  }
+  el.hidden = false;
+  el.replaceChildren();
+  clocks.forEach((clock) => {
+    const line = document.createElement("span");
+    if (clock.at == null) {
+      line.textContent = clock.label;
+    } else {
+      const left = Math.ceil((clock.at - Date.now()) / 1000);
+      if (left > 0) {
+        const num = document.createElement("strong");
+        num.textContent = left + "s";
+        line.append(num, document.createTextNode(" " + clock.label));
+      } else {
+        line.textContent = clock.now;
+      }
+    }
+    el.append(line);
+  });
+}
+
 function render(state) {
   const lists = ["hazards", "shelters", "people", "volunteers", "reports", "units", "timeline"];
   lists.forEach((key) => {
@@ -332,14 +431,30 @@ function render(state) {
   const key = bounds.map((point) => point[0].toFixed(4) + "," + point[1].toFixed(4)).join("|");
   if (key && key !== fitKey) {
     const wide = window.innerWidth > 800;
+    const height = window.innerHeight;
     map.fitBounds(bounds, {
-      paddingTopLeft: [wide ? 440 : 28, wide ? 28 : 150],
-      paddingBottomRight: [36, wide ? 72 : Math.round(window.innerHeight * 0.48)],
+      paddingTopLeft: [wide ? 440 : 28, wide ? 28 : Math.min(96, Math.round(height * 0.16))],
+      paddingBottomRight: [36, wide ? 72 : Math.min(140, Math.round(height * 0.22))],
       animate: false,
     });
+    frameFire(visibleHazards);
     fitKey = key;
     requestAnimationFrame(() => map.invalidateSize());
   }
+  paintCallCountdown();
+}
+
+function frameFire(visibleHazards) {
+  const fire = visibleHazards[0];
+  if (!fire || fire.lat == null || fire.lng == null) return;
+  const wide = window.innerWidth > 800;
+  if (!wide && map.getZoom() < 14) map.setZoom(14, { animate: false });
+  const desired = L.point(
+    Math.round(window.innerWidth * (wide ? 0.62 : 0.55)),
+    Math.round(window.innerHeight * (wide ? 0.48 : 0.22)),
+  );
+  const current = map.latLngToContainerPoint([fire.lat, fire.lng]);
+  map.panBy(current.subtract(desired), { animate: false });
 }
 
 function collectBounds(state, visibleHazards) {
@@ -350,7 +465,9 @@ function collectBounds(state, visibleHazards) {
   };
   state.people.forEach((person) => push(person.lat, person.lng));
   state.shelters.forEach((shelter) => push(shelter.lat, shelter.lng));
-  visibleHazards.forEach((hazard) => push(hazard.lat, hazard.lng));
+  visibleHazards.forEach((hazard) => {
+    organicRing(hazard.lat, hazard.lng, Number(hazard.radius_km) * SPREAD_SCALE).forEach((point) => push(point[0], point[1]));
+  });
   state.reports.forEach((report) => push(report.lat, report.lng));
   state.volunteers.forEach((volunteer) => push(volunteer.lat, volunteer.lng));
   state.units.forEach((unit) => {
@@ -476,28 +593,43 @@ function syncHazards(rows) {
     seen.add(key);
     const color = hazard.kind === "fire" ? "#f97316" : "#1a73e8";
     const tooltip = statusLabel(hazard.kind) + ", " + hazard.severity;
-    const existing = hazardLayers.get(key);
-    if (existing) {
-      existing.setLatLng([hazard.lat, hazard.lng]);
-      existing.setRadius(hazard.radius_km * 1000);
-      existing.setStyle({ color: color, fillColor: color, fillOpacity: 0.22 });
-      existing.setTooltipContent(tooltip);
+    const radius = Number(hazard.radius_km) > 0 ? Number(hazard.radius_km) : 1;
+    const ring = organicRing(hazard.lat, hazard.lng, radius * SPREAD_SCALE);
+    let group = hazardLayers.get(key);
+    if (!group || !group._core) {
+      if (group) hazards.removeLayer(group);
+      const spread = L.polygon(ring, {
+        color: "#ef4444",
+        weight: 2,
+        dashArray: "6, 6",
+        fillColor: "#dc2626",
+        fillOpacity: 0.28,
+      });
+      const core = L.circle([hazard.lat, hazard.lng], {
+        radius: radius * 1000,
+        color: color,
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.55,
+      });
+      group = L.featureGroup([spread, core]);
+      group._core = core;
+      group._spread = spread;
+      group.bindTooltip(tooltip);
+      group.on("click", () => {
+        holdMapClick();
+        openInspector(hazardModel(hazard), true);
+        goTo(hazard.lat, hazard.lng, 13);
+      });
+      group.addTo(hazards);
+      hazardLayers.set(key, group);
       return;
     }
-    const layer = L.circle([hazard.lat, hazard.lng], {
-      radius: hazard.radius_km * 1000,
-      color: color,
-      weight: 2,
-      fillColor: color,
-      fillOpacity: 0.22,
-    }).bindTooltip(tooltip);
-    layer.on("click", () => {
-      holdMapClick();
-      openInspector(hazardModel(hazard), true);
-      goTo(hazard.lat, hazard.lng, 13);
-    });
-    layer.addTo(hazards);
-    hazardLayers.set(key, layer);
+    group._core.setLatLng([hazard.lat, hazard.lng]);
+    group._core.setRadius(radius * 1000);
+    group._core.setStyle({ color: color, fillColor: color });
+    group._spread.setLatLngs(ring);
+    group.setTooltipContent(tooltip);
   });
   dropMissing(hazardLayers, hazards, seen);
 }
@@ -1426,6 +1558,8 @@ async function fetchPicture() {
   (body.phones || []).forEach((row) => {
     if (row.person_id && row.phone) picture.phones[row.person_id] = row.phone;
   });
+  if (Number(body.checkin_timeout_sec) > 0) picture.checkinSec = Number(body.checkin_timeout_sec);
+  if (Number(body.escalation_timeout_sec) > 0) picture.escalationSec = Number(body.escalation_timeout_sec);
 }
 
 function initMap() {
@@ -1751,6 +1885,7 @@ async function tick() {
     const response = await fetch(stateUrl, { cache: "no-store" });
     render(await readJson(response));
     showBanner("");
+    loadRoute();
   } catch (err) {
     try {
       await loadBackup();
@@ -1789,6 +1924,7 @@ async function boot() {
   setInterval(() => {
     if (!lastState || !lastState.incident) return;
     document.getElementById("updated").textContent = updatedPhrase(lastState.incident.updated_at);
+    paintCallCountdown();
   }, 1000);
   setInterval(async () => {
     try {

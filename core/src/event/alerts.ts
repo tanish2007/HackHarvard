@@ -20,6 +20,7 @@ export function logPushed(store: IncidentStore, actions: RelayAction[]): void {
     if (a.type === "say") continue;
     const name =
       store.getPerson(a.person_id)?.name ??
+      store.scenario.units.find((unit) => unit.unit_id === a.person_id)?.name ??
       (a.person_id === "emergency_contact" ? store.scenario.emergency_contact.label : a.person_id);
     if (a.type === "send_text") store.addTimeline({ channel: "imessage", who: "Relay", text: `To ${name}: ${a.text}` });
     else store.addTimeline({ channel: "voice", who: "Relay", text: `Calling ${name} (${a.reason}): ${a.script}` });

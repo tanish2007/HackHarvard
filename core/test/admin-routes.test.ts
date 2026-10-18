@@ -92,7 +92,18 @@ describe("POST /escalations/:person_id/confirm", () => {
 describe("/admin", () => {
   it("POST /admin/alert runs the watcher and returns its summary", async () => {
     const res = await request(fullApp().app).post("/admin/alert");
-    expect(res.body).toEqual({ alerted: 2, person_ids: ["p_amit", "p_priya"], hazards: 1 });
+    expect(res.body).toEqual({ alerted: 1, person_ids: ["p_amit"], hazards: 2 });
+  });
+
+  it("POST /admin/alert/:person_id texts that resident even when they are far from the fire", async () => {
+    const { app, store, pushed } = fullApp();
+    store.recordContact("p_amit", { lat: 42.2943, lng: -71.1919 });
+    const res = await request(app).post("/admin/alert/p_amit");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ alerted: 1, person_ids: ["p_amit"], hazards: 1 });
+    expect(pushed).toEqual([expect.objectContaining({ type: "send_text", person_id: "p_amit", to: store.getPerson("p_amit")?.handle })]);
+    const state = (await request(app).get("/state")).body;
+    expect(state.timeline.map((entry: { text: string }) => entry.text).join("\n")).toMatch(/Fire alert sent to Amit/);
   });
 
   it("POST /admin/alert answers 503 without a watcher", async () => {
@@ -102,9 +113,9 @@ describe("/admin", () => {
   it("POST /admin/clear-fire removes the fire and lets the next alert text again", async () => {
     const { app, pushed } = fullApp();
     const first = await request(app).post("/admin/alert");
-    expect(first.body).toEqual({ alerted: 2, person_ids: ["p_amit", "p_priya"], hazards: 1 });
+    expect(first.body).toEqual({ alerted: 1, person_ids: ["p_amit"], hazards: 2 });
     const before = (await request(app).get("/state")).body;
-    expect(before.hazards).toHaveLength(1);
+    expect(before.hazards).toHaveLength(2);
     expect(before.timeline.length).toBeGreaterThan(0);
     const cleared = await request(app).post("/admin/clear-fire");
     expect(cleared.body).toEqual({ ok: true });
@@ -114,8 +125,8 @@ describe("/admin", () => {
     expect(after.people.find((p: { person_id: string }) => p.person_id === "p_amit").status).toBe("unconfirmed");
     pushed.length = 0;
     const second = await request(app).post("/admin/alert");
-    expect(second.body).toEqual({ alerted: 2, person_ids: ["p_amit", "p_priya"], hazards: 1 });
-    expect(pushed.filter((action) => action.type === "send_text").map((action) => action.person_id).sort()).toEqual(["p_amit", "p_priya"]);
+    expect(second.body).toEqual({ alerted: 1, person_ids: ["p_amit"], hazards: 2 });
+    expect(pushed.filter((action) => action.type === "send_text").map((action) => action.person_id).sort()).toEqual(["p_amit"]);
   });
 
   it("POST /admin/reset makes a second demo run match the first", async () => {
@@ -136,6 +147,15 @@ describe("/admin", () => {
     expect((await request(app).post("/admin/reset")).status).toBe(403);
     expect((await request(app).post("/admin/reset").set("x-relay-admin", "wrong")).status).toBe(403);
     expect((await request(app).post("/admin/reset").set("x-relay-admin", "demo-token")).status).toBe(200);
+  });
+
+  it("accepts a live check-in ping and requires the token when one is set", async () => {
+    const open = await request(fullApp().app).post("/escalations/p_amit/live");
+    expect(open.status).toBe(200);
+    expect(open.body).toEqual({ ok: false });
+    const locked = fullApp({ adminToken: "demo-token" }).app;
+    expect((await request(locked).post("/escalations/p_amit/live")).status).toBe(403);
+    expect((await request(locked).post("/escalations/p_amit/live").set("x-relay-admin", "demo-token")).body).toEqual({ ok: false });
   });
 
   it("is open when no token is set", async () => {

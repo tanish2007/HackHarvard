@@ -128,6 +128,8 @@ export class IncidentStore {
   /** hazard id to its projected spread, from core/src/fire/. */
   private spreads = new Map<string, FireSpread>();
   private offers = new Map<string, VolunteerOffer>();
+  /** Where someone was the last time Relay told them which way to walk. */
+  private directionFrom = new Map<string, { lat: number; lng: number }>();
   private newPeopleCount = 0;
   private updatedAt = "";
 
@@ -199,6 +201,7 @@ export class IncidentStore {
     this.lastText = new Map();
     this.spreads = new Map();
     this.offers = new Map();
+    this.directionFrom = new Map();
     this.newPeopleCount = 0;
     this.updatedAt = at;
   }
@@ -419,6 +422,37 @@ export class IncidentStore {
       p.lng = location.lng;
     }
     this.touch();
+  }
+
+  /**
+   * Where this person was the last time Relay gave them a direction.
+   *
+   * Args:
+   *     personId (string): The person.
+   *
+   * Returns:
+   *     { lat: number; lng: number } | null: That point, or null if Relay
+   *         has not directed them yet.
+   */
+  directionAnchor(personId: string): { lat: number; lng: number } | null {
+    const point = this.directionFrom.get(personId);
+    return point ? { ...point } : null;
+  }
+
+  /**
+   * Remember the point a direction was given from.
+   *
+   * The next reply compares their live location with this, so Relay can say
+   * whether they walked the right way. It is not part of GET /state.
+   *
+   * Args:
+   *     personId (string): The person.
+   *     lat (number): Latitude of the direction.
+   *     lng (number): Longitude of the direction.
+   */
+  rememberDirectionAnchor(personId: string, lat: number, lng: number): void {
+    if (!this.people.has(personId)) return;
+    this.directionFrom.set(personId, { lat, lng });
   }
 
   /**

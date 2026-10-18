@@ -40,12 +40,50 @@ const callLanguages = new Set(
   (process.env.ELEVENLABS_LANGUAGES ?? "es,gu,hi").split(",").map((l) => l.trim().toLowerCase()).filter(Boolean),
 );
 
+/**
+ * Tell Core a check-in call is connected, so Priya is not dialed while Amit
+ * is still on the line.
+ *
+ * Args:
+ *   personId: Who picked up.
+ */
+function reportEscalation(personId: string, path: "live" | "ended"): void {
+  const headers: Record<string, string> = {};
+  const token = process.env.RELAY_ADMIN_TOKEN;
+  if (token) headers["x-relay-admin"] = token;
+  void fetch(`${coreUrl}/escalations/${encodeURIComponent(personId)}/${path}`, { method: "POST", headers }).catch((err) => {
+    console.warn(`[voice] could not update the call for ${personId}: ${String(err)}`);
+  });
+}
+
+/**
+ * Tell Core a check-in call is connected, so the next phone waits.
+ *
+ * Args:
+ *   personId: Who picked up.
+ */
+function reportCallLive(personId: string): void {
+  reportEscalation(personId, "live");
+}
+
+/**
+ * Tell Core the check-in or family call ended, so the next phone waits 10 seconds.
+ *
+ * Args:
+ *   personId: Who we were calling.
+ */
+function reportCallEnded(personId: string): void {
+  reportEscalation(personId, "ended");
+}
+
 const placer = new ElevenLabsPlacer({
   apiKey: need("ELEVENLABS_API_KEY"),
   agentId: need("ELEVENLABS_AGENT_ID"),
   phoneNumberId: need("ELEVENLABS_PHONE_NUMBER_ID"),
   // Core always supplies `to` for check-in calls. Anyone else is unknown here.
   resolveNumber: () => null,
+  onCallLive: reportCallLive,
+  onCallEnded: reportCallEnded,
   languageOf: async (personId) => {
     const lang = (await fetchPersonLanguage(personId, { coreUrl }))?.split(/[-_]/)[0].toLowerCase();
     return lang && callLanguages.has(lang) ? lang : null;
@@ -63,6 +101,7 @@ app.use(
     // it, and say "One moment" on the call meanwhile. Keep this above Core's
     // AGENT_TIMEOUT_MS so Voice does not give up first.
     coreTimeoutMs: Number(process.env.VOICE_CORE_TIMEOUT_MS) || 12000,
+    onCallLive: reportCallLive,
   }),
 );
 // Starts the always-open radio call. It needs the radio agent and the phone

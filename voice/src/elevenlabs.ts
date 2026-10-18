@@ -41,6 +41,16 @@ export interface ElevenLabsConfig {
   fetchImpl?: typeof fetch;
   /** Request timeout in milliseconds. Defaults to 10000. */
   timeoutMs?: number;
+  /**
+   * Called while a check-in call is connected, so Core does not dial the
+   * family contact on the no-answer timer. Absent in tests.
+   */
+  onCallLive?: (personId: string) => void;
+  /**
+   * Called when a check-in or family call ends, so Core can start the
+   * 10 second wait for the next phone.
+   */
+  onCallEnded?: (personId: string) => void;
 }
 
 /** Places calls with the ElevenLabs SIP trunk outbound-call API. */
@@ -96,10 +106,65 @@ export class ElevenLabsPlacer implements CallPlacer {
           dynamic_variables: { person_id: personId, caller_number: to, reason },
         },
       }),
-      signal: AbortSignal.timeout(this.config.timeoutMs ?? 10000),
+      signal: AbortSignal.timeout(this.config.timeoutMs ?? 30000),
     });
+    const raw = await res.text();
     if (!res.ok) {
-      throw new Error(`elevenlabs outbound call failed: ${res.status} ${await res.text()}`);
+      throw new Error(`elevenlabs outbound call failed: ${res.status} ${raw}`);
     }
+    const watched = reason === "missed_checkin" || reason === "escalation";
+    if (watched && (this.config.onCallLive || this.config.onCallEnded)) {
+      let conversationId: string | null = null;
+      try {
+        const parsed = JSON.parse(raw) as { conversation_id?: unknown };
+        if (typeof parsed.conversation_id === "string") conversationId = parsed.conversation_id;
+      } catch {
+        conversationId = null;
+      }
+      if (conversationId) this.holdFamilyWhileConnected(personId, conversationId);
+    }
+  }
+
+  /**
+   * Tell Core the check-in call is connected until ElevenLabs says it ended.
+   *
+   * `in-progress`, or any transcript line, means the call connected. Ringing
+   * has neither, so the family call still happens if they never answer.
+   *
+   * Args:
+   *   personId: Who is being called.
+   *   conversationId: The ElevenLabs conversation for this call.
+   */
+  private holdFamilyWhileConnected(personId: string, conversationId: string): void {
+    const ping = this.config.onCallLive;
+    if (!ping && !this.config.onCallEnded) return;
+    const doFetch = this.config.fetchImpl ?? fetch;
+    const base = this.config.baseUrl ?? "https://api.elevenlabs.io";
+    void (async () => {
+      for (let i = 0; i < 180; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        try {
+          const res = await doFetch(`${base}/v1/convai/conversations/${conversationId}`, {
+            headers: { "xi-api-key": this.config.apiKey },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!res.ok) continue;
+          const body = (await res.json()) as {
+            status?: unknown;
+            transcript?: { message?: unknown }[];
+          };
+          const status = typeof body.status === "string" ? body.status : "";
+          const hasLine = Array.isArray(body.transcript) && body.transcript.some((turn) => String(turn.message ?? "").trim());
+          const connected = status === "in-progress" || hasLine;
+          if (connected) ping?.(personId);
+          if (status === "done" || status === "failed" || status === "processing") {
+            this.config.onCallEnded?.(personId);
+            return;
+          }
+        } catch {
+          // The next poll tries again. A missed poll must not dial anyone.
+        }
+      }
+    })();
   }
 }

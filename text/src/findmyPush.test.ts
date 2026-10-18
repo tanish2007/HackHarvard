@@ -33,8 +33,9 @@ test("a known phone is posted once, and again only when the point moves", async 
   const { deps: d, events } = deps(true);
   assert.equal(await publishFindMyLocation(d, AMIT, POINT), true);
   assert.equal(await publishFindMyLocation(d, AMIT, POINT), false);
+  assert.equal(await publishFindMyLocation(d, AMIT, { lat: 42.37002, lng: -72.52 }), true);
   assert.equal(await publishFindMyLocation(d, AMIT, { lat: 42.38, lng: -72.52 }), true);
-  assert.equal(events.length, 2);
+  assert.equal(events.length, 3);
   assert.equal(events[0]!.person_id, "p_amit");
   assert.equal(events[0]!.text, "");
   assert.deepEqual(events[0]!.location, POINT);
