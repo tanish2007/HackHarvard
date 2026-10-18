@@ -59,4 +59,17 @@ describe("executeActions", () => {
     );
     expect(deps.placer.placeCall).toHaveBeenCalled();
   });
+
+  it("returns how many actions failed", async () => {
+    const deps = makeDeps();
+    deps.placer.placeCall.mockRejectedValueOnce(new Error("down"));
+    const failed = await executeActions(
+      [
+        { type: "place_call", person_id: "p", to: null, script: "s", reason: "r" },
+        { type: "say", text: "ok" },
+      ],
+      deps,
+    );
+    expect(failed).toBe(1);
+  });
 });
