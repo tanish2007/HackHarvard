@@ -25,6 +25,10 @@ export interface RelayDeps {
   sosAckDelayMs?: number;
   /** Posts an event to Core. Never throws. */
   postEvent: (event: RelayEvent) => Promise<CoreResponse>;
+  /** Live Find My locations for people who share with the line. Optional. */
+  findMy?: { latest(handle: string, timeoutMs?: number): Promise<Location | null> };
+  /** Use Find My even for people in the scenario. Off by default. */
+  findMyOverridesScenario?: boolean;
   /** Logger for actions this lane cannot carry out. Defaults to console.warn. */
   log?: (msg: string) => void;
   /** Clock, injectable for tests. Defaults to the current time. */
@@ -97,13 +101,17 @@ export async function processText(
   }
 
   const who = deps.directory.resolve(phone);
-  const event = buildEvent(deps, phone, text, location);
+  const distress = isDistress(text);
+
+  // With no location in the message, use their live Find My location if they
+  // share it. A call for help waits only briefly for it.
+  const where = location ?? (await findMyFor(deps, phone, distress ? 400 : 1500));
+  const event = buildEvent(deps, phone, text, where);
 
   // Start the Core call first. Core answers a call for help with its own SOS
   // reply, so ours is only a stopgap: it goes out only if Core is still silent
   // after a couple of seconds, so a person is never left waiting.
   const pending = deps.postEvent(event);
-  const distress = isDistress(text);
   let acknowledged = false;
   if (distress) {
     const early = await firstOf(pending, deps.sosAckDelayMs ?? SOS_ACK_DELAY_MS);
@@ -128,6 +136,27 @@ export async function processText(
 
   // Nobody is left without a reply, even if Core is down or has nothing to say.
   if (sent === 0 && !acknowledged && !replied) await send(distress ? SOS_RECEIVED : ACKNOWLEDGED);
+}
+
+/**
+ * Look up someone's live Find My location, if we should use it.
+ *
+ * Scenario people keep their scenario location unless Find My is switched on
+ * for them too, so the demo's fire and map stay consistent.
+ *
+ * Args:
+ *     deps: The Find My tracker and phone lookup.
+ *     phone: The person's phone number or email.
+ *     timeoutMs: How long to wait for a direct request.
+ *
+ * Returns:
+ *     Location | null: Their Find My location, or null if there is none or it
+ *         should not be used.
+ */
+export async function findMyFor(deps: RelayDeps, phone: string, timeoutMs: number): Promise<Location | null> {
+  if (!deps.findMy) return null;
+  if (deps.directory.resolve(phone).known && !deps.findMyOverridesScenario) return null;
+  return deps.findMy.latest(phone, timeoutMs);
 }
 
 /**
