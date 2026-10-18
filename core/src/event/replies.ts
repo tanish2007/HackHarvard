@@ -167,4 +167,170 @@ export const replies = {
     if (channel === "voice") return "This is Relay. Say safe if you are safe, or help if you need help.";
     return `Relay here for the ${incident}. Reply SAFE if you are safe, SOS if you need help, or STOP to opt out.`;
   },
+
+  /**
+   * Fire alert text the hazard watcher sends to someone near a fire.
+   *
+   * Args:
+   *     alert (FireAlert): Who, how far, which way, and the nearest shelter.
+   *
+   * Returns:
+   *     string: The alert text.
+   */
+  fireAlert(alert: FireAlert): string {
+    const where = alert.inside
+      ? "you are inside the fire area"
+      : `the fire is ${km(alert.fireKm)} km ${alert.direction} of you`;
+    let shelter = "";
+    if (alert.shelter) {
+      const s = alert.shelter;
+      const trip = s.minutes === null ? `${km(s.km)} km away` : `${km(s.km)} km, about ${minutes(s.minutes)} min by car`;
+      shelter = ` Nearest shelter: ${s.name}, ${trip}.`;
+    }
+    return (
+      `Relay alert for the ${alert.incident}, ${alert.name}: ${where}.${shelter}` +
+      " Reply SAFE if you are safe, or SOS if you need help."
+    );
+  },
+
+  /**
+   * Script for the check-in call when someone does not answer an alert.
+   *
+   * It asks "Are you safe" on purpose: a bare "yes" on a call counts as safe
+   * in the fast rules, so the question has to make "yes" mean safe.
+   *
+   * Args:
+   *     incident (string): Incident name.
+   *
+   * Returns:
+   *     string: The spoken script.
+   */
+  checkinCall(incident: string): string {
+    return (
+      `This is Relay, the service that just texted you about the ${incident}. ` +
+      "Are you safe right now? Say yes if you are safe, or help if you need help."
+    );
+  },
+
+  /**
+   * Script for the call to a family contact when Relay cannot reach someone.
+   *
+   * It ends by asking whether the family member is safe, so a "yes" or "ok"
+   * from them only ever marks themselves safe, never the missing person.
+   *
+   * Args:
+   *     name (string): The person Relay cannot reach.
+   *     incident (string): Incident name.
+   *
+   * Returns:
+   *     string: The spoken script.
+   */
+  familyCall(name: string, incident: string): string {
+    return (
+      `This is Relay, calling about the ${incident}. We sent ${name} a fire alert and called them, but could not reach them. ` +
+      `If you can, please try to reach ${name} and ask them to text Relay back. Responders are being told. ` +
+      "Are you safe yourself? Say yes if you are safe, or help if you need help."
+    );
+  },
+
+  /**
+   * Spoken briefing for the emergency call a responder confirmed.
+   *
+   * Args:
+   *     brief (EmergencyBrief): Who needs help, where, and for how long.
+   *
+   * Returns:
+   *     string: The spoken script.
+   */
+  emergencyBriefing(brief: EmergencyBrief): string {
+    const parts = [
+      `This is Relay, an automated evacuation service for the ${brief.incident}. A responder confirmed this call.`,
+      `${brief.name} needs help.`,
+      `Last known location: ${brief.where}.`,
+      `They have been flagged as needing help for ${duration(brief.sosMinutes)}.`,
+    ];
+    if (brief.lastMessage) parts.push(`Their last message was: ${brief.lastMessage}.`);
+    return parts.join(" ");
+  },
 };
+
+/**
+ * What goes into a fire alert.
+ *
+ * Attributes:
+ *     name (string): The person being alerted.
+ *     incident (string): Incident name.
+ *     fireKm (number): Distance from them to the fire's edge, in km.
+ *     direction (string): Compass word from them to the fire, e.g. "northeast".
+ *     inside (boolean): True if they are inside the fire circle.
+ *     shelter ({ name, km, minutes } | null): Nearest shelter. `km` is the
+ *         route length (or straight-line distance if routing failed), and
+ *         `minutes` the drive time, or null if routing failed.
+ */
+export interface FireAlert {
+  name: string;
+  incident: string;
+  fireKm: number;
+  direction: string;
+  inside: boolean;
+  shelter: { name: string; km: number; minutes: number | null } | null;
+}
+
+/**
+ * What goes into the emergency briefing.
+ *
+ * Attributes:
+ *     name (string): The person in SOS.
+ *     incident (string): Incident name.
+ *     where (string): Spoken location, e.g. "Zone 3, about 0.4 km from Oak St".
+ *     sosMinutes (number): How long they have been in SOS.
+ *     lastMessage (string | null): Their last message, if any.
+ */
+export interface EmergencyBrief {
+  name: string;
+  incident: string;
+  where: string;
+  sosMinutes: number;
+  lastMessage: string | null;
+}
+
+/**
+ * Format a distance for a text, to one decimal place.
+ *
+ * Args:
+ *     value (number): Kilometres.
+ *
+ * Returns:
+ *     string: e.g. "2.3".
+ */
+function km(value: number): string {
+  return (Math.round(value * 10) / 10).toFixed(1);
+}
+
+/**
+ * Format a drive time in whole minutes, never less than one.
+ *
+ * Args:
+ *     value (number): Minutes.
+ *
+ * Returns:
+ *     string: e.g. "6".
+ */
+function minutes(value: number): string {
+  return String(Math.max(1, Math.ceil(value)));
+}
+
+/**
+ * Say how long something has lasted.
+ *
+ * Args:
+ *     mins (number): Minutes, possibly fractional.
+ *
+ * Returns:
+ *     string: "less than a minute", "1 minute", or "N minutes".
+ */
+function duration(mins: number): string {
+  const whole = Math.floor(mins);
+  if (whole < 1) return "less than a minute";
+  return whole === 1 ? "1 minute" : `${whole} minutes`;
+}
