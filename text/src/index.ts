@@ -4,7 +4,7 @@ import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 import { createActionsServer } from "./actionsServer.js";
 import { postEvent } from "./coreClient.js";
-import { loadDirectory } from "./people.js";
+import { loadDirectory, normalizePhone } from "./people.js";
 import { Registry } from "./registry.js";
 import { processText, type RelayDeps } from "./relay.js";
 
@@ -46,7 +46,7 @@ createActionsServer({
 // `app.messages` is an async iterable. Each tick yields a `space` (the
 // conversation) and an inbound `message`. Reply by awaiting `space.send(...)`.
 for await (const [space, message] of app.messages) {
-  const phone = message.sender?.id;
+  const phone = normalizePhone(message.sender?.id ?? "");
   console.log("incoming", message.platform, phone, message.content.type);
   if (message.content.type !== "text" || !phone) continue;
 

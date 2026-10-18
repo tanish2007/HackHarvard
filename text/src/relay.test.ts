@@ -47,7 +47,7 @@ async function run(deps: RelayDeps, phone: string, text: string): Promise<string
   return sent;
 }
 
-const SEND_AMIT = { type: "send_text" as const, person_id: "p_amit", text: "Go to Shelter B.", map_url: null };
+const SEND_AMIT = { type: "send_text" as const, person_id: "p_amit", to: null, text: "Go to Shelter B.", map_url: null };
 
 test("the first text signs up and does not go to Core", async () => {
   const { deps, events } = makeDeps({ actions: [] });
@@ -120,6 +120,14 @@ test("Core's send_text for the sender becomes the reply", async () => {
   assert.deepEqual(await run(deps, AMIT, "where do I go"), ["Go to Shelter B."]);
 });
 
+test("a reply is accepted when Core's person_id differs but `to` is the sender", async () => {
+  // Core may already know this number under another id. The number decides.
+  const other = { ...SEND_AMIT, person_id: "p_core_made_up", to: "(617) 555-0101" };
+  const { deps } = makeDeps({ actions: [other] });
+  await run(deps, AMIT, "hello");
+  assert.deepEqual(await run(deps, AMIT, "where do I go"), ["Go to Shelter B."]);
+});
+
 test("several send_text actions become several replies in order", async () => {
   const second = { ...SEND_AMIT, text: "Take Oak Road." };
   const { deps } = makeDeps({ actions: [SEND_AMIT, second] });
@@ -135,7 +143,7 @@ test("when Core has nothing to say the sender still gets a reply", async () => {
 
 test("actions for other people or other channels are logged and skipped", async () => {
   const other = { ...SEND_AMIT, person_id: "p_priya", text: "for Priya" };
-  const call = { type: "place_call" as const, person_id: "p_amit", script: "hi", reason: "x" };
+  const call = { type: "place_call" as const, person_id: "p_amit", to: null, script: "hi", reason: "x" };
   const { deps, logs } = makeDeps({ actions: [other, call, SEND_AMIT] });
   await run(deps, AMIT, "hello");
   assert.deepEqual(await run(deps, AMIT, "where do I go"), ["Go to Shelter B."]);

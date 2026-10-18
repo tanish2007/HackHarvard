@@ -6,7 +6,7 @@
  * code in it and can be tested on its own.
  */
 import type { RelayAction } from "./contracts.js";
-import type { PeopleDirectory } from "./people.js";
+import { normalizePhone, type PeopleDirectory } from "./people.js";
 import type { Registry } from "./registry.js";
 
 /** What {@link deliverActions} needs to run. */
@@ -61,8 +61,10 @@ export async function deliverActions(deps: AlertDeps, actions: RelayAction[]): P
         report.skipped.push({ person_id: action.person_id, reason });
       };
 
-      const phone = deps.directory.phoneFor(action.person_id);
-      if (!phone) return skip("no phone number in the scenario");
+      // The scenario first. Core's `to` covers people who signed up by text and
+      // are not in scenario.json.
+      const phone = deps.directory.phoneFor(action.person_id) ?? (action.to ? normalizePhone(action.to) : null);
+      if (!phone) return skip("no phone number in the scenario or on the action");
       if (deps.registry.status(phone) !== "opted_in") return skip("not opted in");
 
       const text = action.map_url ? `${action.text}\n${action.map_url}` : action.text;

@@ -27,6 +27,7 @@ function respond(event: RelayEvent): CoreResponse {
       {
         type: "send_text",
         person_id: event.person_id,
+        to: event.from,
         text: `(fake Core) ${event.person_id} said: "${event.text}"`,
         map_url: null,
       },
