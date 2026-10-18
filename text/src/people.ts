@@ -82,6 +82,16 @@ export class PeopleDirectory {
   }
 
   /**
+   * Every phone number in the scenario, for a Find My lookup.
+   *
+   * Returns:
+   *     string[]: Normalized numbers. Simulated people with no phone are absent.
+   */
+  phones(): string[] {
+    return [...this.byId.values()].map((person) => normalizePhone(person.phone));
+  }
+
+  /**
    * Find who a phone number belongs to.
    *
    * Args:

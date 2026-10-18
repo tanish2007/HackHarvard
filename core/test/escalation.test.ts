@@ -122,7 +122,7 @@ describe("confirm", () => {
     const call = pushed.find((a) => a.type === "place_call") as PlaceCallAction;
     expect(call).toMatchObject({ person_id: EMERGENCY_PERSON_ID, to: store.scenario.emergency_contact.phone, reason: "human_confirmed" });
     expect(call.script).toContain("Amit");
-    expect(call.script).toContain("Zone 3");
+    expect(call.script).toContain("Zone 1");
     expect(store.snapshot().timeline.map((t) => t.text)).toContain("911 call confirmed by Rudra for Amit");
     expect(await engine.confirm("p_amit")).toEqual({ ok: false, error: "already_confirmed" });
   });

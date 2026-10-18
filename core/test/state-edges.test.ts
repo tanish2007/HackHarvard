@@ -22,9 +22,9 @@ describe("Contract D values", () => {
       {
         id: "hz_scenario_fire",
         kind: "fire",
-        lat: 37.872,
-        lng: -122.205,
-        radius_km: 1.2,
+        lat: 42.365,
+        lng: -71.122,
+        radius_km: 1,
         severity: "high",
         source: "scenario",
         updated_at: T0,
@@ -36,7 +36,7 @@ describe("Contract D values", () => {
     const { shelters } = makeStore().store.snapshot();
     expect(shelters.map((s) => s.id)).toEqual(["sh_a", "sh_b", "sh_c"]);
     for (const s of shelters) {
-      expect(s.distance_km).toBe(distanceKm(37.86, -122.225, s.lat, s.lng));
+      expect(s.distance_km).toBe(distanceKm(42.3744, -71.1169, s.lat, s.lng));
       expect(s.distance_km).toBeGreaterThan(0);
     }
     expect(shelters[2].capacity_note).toBe("Medical staff on site");
@@ -48,7 +48,7 @@ describe("Contract D values", () => {
 
   it("gives volunteers exactly the proposed volunteer fields", () => {
     expect(makeStore().store.snapshot().volunteers).toEqual([
-      { volunteer_id: "v_sam", name: "Sam", lat: 37.865, lng: -122.25, capacity_note: "", status: "available" },
+      { volunteer_id: "v_sam", name: "Sam", lat: 42.3812, lng: -71.129, capacity_note: "", status: "available" },
     ]);
   });
 
@@ -63,8 +63,8 @@ describe("Contract D values", () => {
     expect(people.find((p) => p.person_id === "p_amit")).toEqual({
       person_id: "p_amit",
       name: "Amit",
-      lat: 37.851,
-      lng: -122.224,
+      lat: 42.374,
+      lng: -71.1175,
       status: "unconfirmed",
       last_contact: null,
       language: "en",

@@ -104,13 +104,13 @@ describe("the same fire with a new id", () => {
    *     The watcher and a function to move the fire, with a new id.
    */
   function movingFire() {
-    let fire = { id: "f1", lat: 37.872, lng: -122.205 };
+    let fire = { id: "f1", lat: 42.37, lng: -71.118 };
     const { watcher } = setup({
       async getHazards() {
         return [{ ...fire, kind: "fire" as const, radius_km: 1.2, severity: "high", source: "firms", updated_at: "" }];
       },
     });
-    return { watcher, move: (id: string, dLat: number) => (fire = { id, lat: 37.872 + dLat, lng: -122.205 }) };
+    return { watcher, move: (id: string, dLat: number) => (fire = { id, lat: 42.37 + dLat, lng: -71.118 }) };
   }
 
   it("does not re-alert for a new id less than 1 km away", async () => {
@@ -123,7 +123,7 @@ describe("the same fire with a new id", () => {
   it("alerts again for a fire more than 1 km away", async () => {
     const { watcher, move } = movingFire();
     await watcher.runOnce();
-    move("f3", -0.015); // about 1.7 km south, closer to the residents
+    move("f3", -0.015); // about 1.7 km south, still inside the alert radius
     expect((await watcher.runOnce()).alerted).toBe(2);
   });
 });

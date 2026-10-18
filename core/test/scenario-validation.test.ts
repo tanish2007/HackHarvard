@@ -186,7 +186,7 @@ describe("scenario.json: duplicate ids", () => {
 describe("scenario.json: places, fake weather, and the command post", () => {
   it("loads the committed places and forecast", () => {
     const s = loadScenario({ dir: ROOT, useLocal: false });
-    expect(s.places.map((p) => p.id)).toEqual(["pl_command_post", "pl_oak_st", "pl_pine_ave", "pl_route_24"]);
+    expect(s.places.map((p) => p.id)).toEqual(["pl_command_post", "pl_oak_st", "pl_pine_ave", "pl_route_24", "pl_western_ave"]);
     expect(s.settings.command_post).toBe("pl_command_post");
     expect(s.fake_weather).toMatchObject({ wind_mph: 22, wind_dir: "NE" });
   });

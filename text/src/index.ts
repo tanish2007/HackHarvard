@@ -6,6 +6,7 @@ import { createActionsServer } from "./actionsServer.js";
 import { postEvent } from "./coreClient.js";
 import { FindMyTracker } from "./findmy.js";
 import { openPhotonLocationSource } from "./findmyPhoton.js";
+import { publishFindMyLocation, sweepFindMy } from "./findmyPush.js";
 import { LOCATING_NOTE, LOCATION_HINT } from "./handler.js";
 import { interpretContent, type IncomingContent } from "./incoming.js";
 import { loadDirectory, normalizePhone } from "./people.js";
@@ -29,10 +30,16 @@ console.log(`[text] sending events to ${coreUrl}`);
 if (process.env.FINDMY !== "0") {
   const tracker = new FindMyTracker({
     open: () => openPhotonLocationSource(process.env.PROJECT_ID!, process.env.PROJECT_SECRET!),
+    onConnect: () => {
+      void sweepFindMy(deps);
+    },
+    onUpdate: (handle, location) => {
+      void publishFindMyLocation(deps, handle, location);
+    },
   });
-  tracker.start();
   deps.findMy = tracker;
   deps.findMyOverridesScenario = process.env.FINDMY_OVERRIDE === "1";
+  tracker.start();
 }
 
 // Spectrum bridges a single agent loop to many messaging interfaces.

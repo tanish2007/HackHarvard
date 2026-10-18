@@ -37,21 +37,30 @@ def build_weather():
     return get_weather(center["lat"], center["lng"])
 
 
-def build_route():
+def build_route(start_lat=None, start_lng=None):
     """Return one resident's route to the nearest shelter.
 
     The resident is the first unconfirmed person in the scenario who is
-    not part of the simulated crowd. The map draws this line itself.
-    It is not a field on GET /state.
+    not part of the simulated crowd. The shelter is chosen from that
+    person's scenario position, so a live GPS fix far from the fire still
+    routes back to the incident shelter. The line starts at start_lat and
+    start_lng when those are set, and at the scenario position otherwise.
+    The map draws this line itself. It is not a field on GET /state.
+
+    Args:
+        start_lat (float | None): Live latitude. Scenario latitude when omitted.
+        start_lng (float | None): Live longitude. Scenario longitude when omitted.
 
     Returns:
         dict: Route fields plus person_name and shelter_name.
     """
     person = _route_person(load_scenario()["people"])
+    origin_lat = person["lat"] if start_lat is None else start_lat
+    origin_lng = person["lng"] if start_lng is None else start_lng
     shelters = get_shelters(person["lat"], person["lng"])
     if shelters:
         shelter = shelters[0]
-        route = get_route(person["lat"], person["lng"], shelter["lat"], shelter["lng"])
+        route = get_route(origin_lat, origin_lng, shelter["lat"], shelter["lng"])
         shelter_name = shelter["name"]
     else:
         route = {

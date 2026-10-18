@@ -2,7 +2,7 @@
   "_readme": "Contract E. Every phone number here is a fictional 555-01xx placeholder. Real numbers go in scenario.local.json, which is gitignored. Copy scenario.local.example.json to start.",
   "incident": {
     "name": "Oak Ridge Fire",
-    "center": { "lat": 37.86, "lng": -122.225 }
+    "center": { "lat": 42.3744, "lng": -71.1169 }
   },
   "relay_lines": {
     "messaging": "+16175550100",
@@ -12,25 +12,26 @@
     {
       "id": "zone_1",
       "name": "Zone 1",
-      "polygon": [[37.875, -122.235], [37.875, -122.215], [37.865, -122.215], [37.865, -122.235]]
+      "polygon": [[42.3785, -71.1232], [42.3785, -71.1112], [42.3705, -71.1112], [42.3705, -71.1232]]
     },
     {
       "id": "zone_2",
       "name": "Zone 2",
-      "polygon": [[37.865, -122.235], [37.865, -122.215], [37.855, -122.215], [37.855, -122.235]]
+      "polygon": [[42.3695, -71.132], [42.3695, -71.112], [42.3585, -71.112], [42.3585, -71.132]]
     },
     {
       "id": "zone_3",
       "name": "Zone 3",
-      "polygon": [[37.855, -122.235], [37.855, -122.215], [37.845, -122.215], [37.845, -122.235]]
+      "polygon": [[42.3785, -71.112], [42.3785, -71.0985], [42.3665, -71.0985], [42.3665, -71.112]]
     }
   ],
-  "fire_area": { "lat": 37.872, "lng": -122.205, "radius_km": 1.2 },
+  "fire_area": { "lat": 42.365, "lng": -71.122, "radius_km": 1.0 },
   "places": [
-    { "id": "pl_command_post", "name": "Command Post", "aliases": ["cp", "staging", "base"], "lat": 37.8605, "lng": -122.255 },
-    { "id": "pl_oak_st", "name": "Oak St", "aliases": ["oak street"], "lat": 37.856, "lng": -122.231 },
-    { "id": "pl_pine_ave", "name": "Pine Ave", "aliases": ["pine avenue"], "lat": 37.868, "lng": -122.229 },
-    { "id": "pl_route_24", "name": "Route 24", "aliases": ["highway 24", "hwy 24"], "lat": 37.852, "lng": -122.212 }
+    { "id": "pl_command_post", "name": "Command Post", "aliases": ["cp", "staging", "base"], "lat": 42.3718, "lng": -71.1075 },
+    { "id": "pl_oak_st", "name": "Oak St", "aliases": ["oak street"], "lat": 42.3735, "lng": -71.121 },
+    { "id": "pl_pine_ave", "name": "Pine Ave", "aliases": ["pine avenue"], "lat": 42.3765, "lng": -71.124 },
+    { "id": "pl_route_24", "name": "Route 24", "aliases": ["highway 24", "hwy 24"], "lat": 42.368, "lng": -71.11 },
+    { "id": "pl_western_ave", "name": "Western Ave", "aliases": ["western avenue", "western ave"], "lat": 42.3645, "lng": -71.119 }
   ],
   "fake_weather": {
     "summary": "Hot, dry, and gusty. Red flag warning in effect.",
@@ -40,9 +41,9 @@
     "next_2h": "Northeast wind 20 to 25 mph, gusts to 35, pushing the fire southwest toward Zone 1."
   },
   "shelters": [
-    { "id": "sh_a", "name": "Shelter A", "lat": 37.87, "lng": -122.27, "capacity_note": "Gym, about 200 cots" },
-    { "id": "sh_b", "name": "Shelter B", "lat": 37.859, "lng": -122.262, "capacity_note": "Pets allowed" },
-    { "id": "sh_c", "name": "Shelter C", "lat": 37.847, "lng": -122.258, "capacity_note": "Medical staff on site" }
+    { "id": "sh_a", "name": "Shelter A", "lat": 42.3835, "lng": -71.1188, "capacity_note": "Gym, about 200 cots" },
+    { "id": "sh_b", "name": "Shelter B", "lat": 42.3738, "lng": -71.1385, "capacity_note": "Pets allowed" },
+    { "id": "sh_c", "name": "Shelter C", "lat": 42.3708, "lng": -71.1018, "capacity_note": "Medical staff on site" }
   ],
   "people": [
     {
@@ -50,10 +51,10 @@
       "name": "Amit",
       "role": "resident",
       "phone": "+16175550101",
-      "lat": 37.851,
-      "lng": -122.224,
+      "lat": 42.374,
+      "lng": -71.1175,
       "language": "en",
-      "zone": "zone_3",
+      "zone": "zone_1",
       "household_id": "h_patel",
       "family_contact": "p_priya",
       "initial_status": "unconfirmed",
@@ -64,10 +65,10 @@
       "name": "Priya",
       "role": "resident",
       "phone": "+16175550102",
-      "lat": 37.859,
-      "lng": -122.229,
+      "lat": 42.3776,
+      "lng": -71.115,
       "language": "gu",
-      "zone": "zone_2",
+      "zone": "zone_1",
       "household_id": "h_patel",
       "family_contact": "p_amit",
       "initial_status": "unconfirmed",
@@ -78,8 +79,8 @@
       "name": "Sam",
       "role": "volunteer",
       "phone": "+16175550103",
-      "lat": 37.865,
-      "lng": -122.25,
+      "lat": 42.3812,
+      "lng": -71.129,
       "language": "en",
       "zone": null,
       "household_id": null,

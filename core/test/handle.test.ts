@@ -121,7 +121,7 @@ describe("finding the sender", () => {
   it("keeps the old location when the event has none", async () => {
     const { store } = makeStore();
     await send(store, { text: "hi" });
-    expect(store.getPerson("p_amit")).toMatchObject({ lat: 37.851, lng: -122.224 });
+    expect(store.getPerson("p_amit")).toMatchObject({ lat: 42.374, lng: -71.1175 });
   });
 
   it("marks a unit as heard", async () => {
