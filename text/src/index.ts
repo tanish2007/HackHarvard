@@ -1,5 +1,6 @@
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
+import { createActionsServer } from "./actionsServer.js";
 import { postEvent } from "./coreClient.js";
 import { loadDirectory } from "./people.js";
 import { Registry } from "./registry.js";
@@ -24,6 +25,18 @@ const app = await Spectrum({
     imessage.config(),
   ],
 });
+
+// Core pushes alerts here. They go to people who may never have texted first,
+// so each one opens a conversation with the phone number instead of replying.
+const textPort = Number(process.env.TEXT_PORT) || 3002;
+createActionsServer({
+  registry: deps.registry,
+  directory: deps.directory,
+  sendTo: async (phone, text) => {
+    const space = await imessage(app).space.create(phone);
+    await space.send(text);
+  },
+}).listen(textPort, () => console.log(`[text] accepting pushed actions on http://localhost:${textPort}/actions`));
 
 // `app.messages` is an async iterable. Each tick yields a `space` (the
 // conversation) and an inbound `message`. Reply by awaiting `space.send(...)`.
