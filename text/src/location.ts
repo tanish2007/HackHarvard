@@ -46,3 +46,60 @@ export function parseCoordinates(text: string): Location | null {
   }
   return null;
 }
+
+/** Short Google Maps links, which hide the coordinates behind a redirect. */
+const SHORT_LINK = /https?:\/\/(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/)[^\s]+/i;
+
+/** Only follow redirects to Google's own hosts, so a message cannot aim us elsewhere. */
+const GOOGLE_HOST = /(^|\.)(google\.com|goo\.gl|g\.co)$/i;
+
+/** Options for {@link resolveShortLink}. */
+export interface ResolveOptions {
+  /** Fetch implementation, injectable for tests. */
+  fetchImpl?: typeof fetch;
+  /** Time allowed for each request in milliseconds. Defaults to 3000. */
+  timeoutMs?: number;
+  /** Most redirects to follow. Defaults to 5. */
+  maxHops?: number;
+}
+
+/**
+ * Find the coordinates behind a short Google Maps link in some text.
+ *
+ * Google Maps shares a location as a link like https://maps.app.goo.gl/abc123.
+ * The coordinates are not in it, but the redirect it leads to has them.
+ *
+ * Args:
+ *     text: A message that may contain a short Maps link.
+ *     options: Fetch, timeout and redirect limit.
+ *
+ * Returns:
+ *     Location | null: The coordinates, or null if the text has no short link,
+ *         the link leaves Google, or anything goes wrong. Never throws.
+ */
+export async function resolveShortLink(text: string, options: ResolveOptions = {}): Promise<Location | null> {
+  const doFetch = options.fetchImpl ?? fetch;
+  let url = SHORT_LINK.exec(text)?.[0];
+  if (!url) return null;
+
+  try {
+    for (let hop = 0; hop <= (options.maxHops ?? 5); hop++) {
+      if (!GOOGLE_HOST.test(new URL(url).hostname)) return null;
+      const res = await doFetch(url, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(options.timeoutMs ?? 3000),
+      });
+      const next = res.headers.get("location");
+      if (!next) {
+        // No redirect: the page itself may name the place, for example in a map image URL.
+        return parseCoordinates((await res.text()).slice(0, 200_000));
+      }
+      url = new URL(next, url).toString();
+      const found = parseCoordinates(url);
+      if (found) return found;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
