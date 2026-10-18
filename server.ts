@@ -6,7 +6,11 @@
  */
 import { existsSync } from "node:fs";
 import express from "express";
+import { createGeminiClient, DEFAULT_GEMINI_MODEL } from "./core/src/agent/gemini.js";
+import { createAgent } from "./core/src/agent/loop.js";
 import { createCoreRouter } from "./core/src/app.js";
+import { createStubData } from "./core/src/data/stub.js";
+import type { Agent } from "./core/src/event/handle.js";
 import { jsonErrorHandler } from "./core/src/lib/asyncHandler.js";
 import { loadScenario, placeholderIds } from "./core/src/scenario/load.js";
 import { IncidentStore } from "./core/src/state/store.js";
@@ -22,8 +26,23 @@ if (placeholders.length > 0) {
   );
 }
 
+const store = new IncidentStore(scenario);
+// Rudra's Contract C functions are Python. Until they are reachable over
+// HTTP, the agent uses a TypeScript stub with the same shapes.
+const data = createStubData(scenario);
+
+let agent: Agent | undefined;
+if (process.env.GEMINI_API_KEY) {
+  const model = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+  const llm = createGeminiClient({ apiKey: process.env.GEMINI_API_KEY, model, thinkingLevel: process.env.GEMINI_THINKING_LEVEL || undefined });
+  agent = createAgent({ store, data, llm, log: process.env.RELAY_DEBUG ? console.log : undefined });
+  console.log(`[core] agent on: Gemini ${model}`);
+} else {
+  console.warn("[core] agent off: set GEMINI_API_KEY in .env. Keyword rules still work.");
+}
+
 const app = express();
-app.use(createCoreRouter({ scenario, store: new IncidentStore(scenario) }));
+app.use(createCoreRouter({ scenario, store, agent }));
 app.use(jsonErrorHandler);
 
 const port = Number(process.env.PORT ?? 3000);
