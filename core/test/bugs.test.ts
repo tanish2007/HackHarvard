@@ -5,11 +5,13 @@
  * separately. When a fix lands, move the test into the matching file.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHazardWatcher } from "../src/alerts/watcher.js";
 import { createAgent } from "../src/agent/loop.js";
 import { createStubData } from "../src/data/stub.js";
+import { createEscalationEngine } from "../src/escalation/engine.js";
 import { handleEvent } from "../src/event/handle.js";
 import { classify } from "../src/rules/fastpath.js";
-import { answer, makeEvent, makeStore, PHONES, runTool, scriptedLlm, toolCalls, toolContext } from "./helpers.js";
+import { answer, makeEvent, makeStore, PHONES, recordingDispatcher, runTool, scriptedLlm, toolCalls, toolContext } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -53,5 +55,31 @@ describe("person_id from the channel", () => {
     await handleEvent(makeEvent({ from: "+14155550150", person_id: "p_0150", text: "I'm safe" }), { store });
     expect(store.getPerson("p_0150")?.status).toBe("unconfirmed");
     expect(store.findPersonByHandle("+14155550150")).toBeDefined();
+  });
+});
+
+describe("fire alert language", () => {
+  // The fire alert and the call scripts came from the escalation branch,
+  // the translations from the multilingual branch. They never met.
+  it("sends Priya her fire alert in Gujarati", async () => {
+    const { store } = makeStore();
+    const { dispatcher, pushed } = recordingDispatcher();
+    const watcher = createHazardWatcher({ store, data: createStubData(store.scenario), dispatcher, log: () => {} });
+    await watcher.runOnce();
+    const alert = pushed.find((a) => "person_id" in a && a.person_id === "p_priya");
+    expect(alert && "text" in alert ? alert.text : "").toMatch(/\p{Script=Gujarati}/u);
+  });
+});
+
+describe("confirm after a failed call", () => {
+  // If Voice is down the first time, the responder cannot press confirm again.
+  it("lets the responder retry when the emergency call was not delivered", async () => {
+    const { store } = makeStore();
+    const failing = recordingDispatcher(false);
+    const engine = createEscalationEngine({ store, dispatcher: failing.dispatcher, log: () => {} });
+    store.setStatus("p_amit", "sos");
+    const first = await engine.confirm("p_amit");
+    expect(first.ok && first.results.every((r) => r.ok)).toBe(false);
+    expect((await engine.confirm("p_amit")).ok).toBe(true);
   });
 });
