@@ -7,6 +7,7 @@
  */
 import { FunctionCallingConfigMode, GoogleGenAI, type Content, type GenerateContentConfig, type ThinkingLevel } from "@google/genai";
 import type { LlmClient, LlmContent, LlmRequest, LlmResult } from "./llm.js";
+import { withRetry } from "./retry.js";
 
 /** Fast and cheap by default. Override with GEMINI_MODEL. */
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
@@ -33,7 +34,8 @@ export interface GeminiOptions {
  *     options (GeminiOptions): API key, model, and optional thinking level.
  *
  * Returns:
- *     LlmClient: A client whose generate() calls Gemini once.
+ *     LlmClient: A client whose generate() calls Gemini, retrying a couple of
+ *         times if Google is briefly overloaded.
  */
 export function createGeminiClient(options: GeminiOptions): LlmClient {
   const ai = new GoogleGenAI({ apiKey: options.apiKey });
@@ -62,11 +64,17 @@ export function createGeminiClient(options: GeminiOptions): LlmClient {
       };
       if (options.thinkingLevel) config.thinkingConfig = { thinkingLevel: options.thinkingLevel as ThinkingLevel };
 
-      const res = await ai.models.generateContent({
-        model: options.model,
-        contents: req.contents as Content[],
-        config,
-      });
+      // Google sometimes answers 503 "high demand" for a moment. Try again
+      // quickly instead of sending the caller the fallback line.
+      const res = await withRetry(
+        () =>
+          ai.models.generateContent({
+            model: options.model,
+            contents: req.contents as Content[],
+            config,
+          }),
+        { signal: req.signal },
+      );
 
       const content = (res.candidates?.[0]?.content ?? { role: "model", parts: [] }) as LlmContent;
       // Read text from the parts directly: res.text warns when tool calls are
