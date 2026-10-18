@@ -66,7 +66,7 @@ export function createAgent(deps: AgentDeps): Agent {
       who: ctx.who,
       isResponder: Boolean(ctx.unit) || ctx.event.channel === "radio",
       origin,
-      extraActions: [],
+      extraActions: ctx.sideActions ?? [],
     };
 
     const zone = scenario.zones.find((z) => z.id === ctx.person?.zone)?.name ?? null;

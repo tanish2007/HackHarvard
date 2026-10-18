@@ -25,6 +25,10 @@ import { replies, type Medium } from "./replies.js";
  *     who (string): Display name of the sender for the timeline.
  *     signal (AbortSignal): Aborted when Core stops waiting, so the agent
  *         can cancel its LLM call instead of running on in the background.
+ *     sideActions (RelayAction[] | undefined): Where the agent puts actions
+ *         its tools add besides the reply, e.g. the family text after an
+ *         SOS. The handler owns the list, so it still sends them if the
+ *         agent fails or times out after the tool ran.
  */
 export interface AgentContext {
   event: RelayEvent;
@@ -33,6 +37,7 @@ export interface AgentContext {
   unit: TrackedUnit | undefined;
   who: string;
   signal: AbortSignal;
+  sideActions?: RelayAction[];
 }
 
 /** The LLM agent, plugged in by the agent step. Returns actions to send. */
@@ -254,12 +259,21 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       const channelKind = event.channel === "radio" ? "radio" : medium === "spoken" ? "voice" : "text";
       if (!deps.agent) return [reply(replies.fallback(incident, channelKind, lang))];
       const controller = new AbortController();
+      const sideActions: RelayAction[] = [];
+      const statusBefore = person?.status;
       try {
-        const run = deps.agent({ event, text, person, unit, who: sender.who, signal: controller.signal });
+        const run = deps.agent({ event, text, person, unit, who: sender.who, signal: controller.signal, sideActions });
         return await withTimeout(run, AGENT_TIMEOUT_MS, controller);
       } catch (err) {
         console.error(`[core] agent failed for ${event.event_id}:`, err);
-        return [reply(replies.fallback(incident, channelKind, lang))];
+        // A tool may already have acted, e.g. set_status sos texted the
+        // family. Send those, and if the sender is now in SOS, say so.
+        const now = person ? store.getPerson(person.person_id) : undefined;
+        const body =
+          now?.status === "sos" && statusBefore !== "sos"
+            ? replies.sos(now.name, medium, now.lat !== null, lang)
+            : replies.fallback(incident, channelKind, lang);
+        return [reply(body), ...sideActions];
       }
     }
   }
