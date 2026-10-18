@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { isDistress, parseCommand } from "./commands.js";
 import type { CoreResponse, RelayEvent } from "./contracts.js";
 import { ACKNOWLEDGED, SOS_RECEIVED, handleText } from "./handler.js";
-import type { PeopleDirectory } from "./people.js";
+import { normalizePhone, type PeopleDirectory } from "./people.js";
 import type { Registry } from "./registry.js";
 
 /** How long Core gets to answer an SOS before we send our own acknowledgement. */
@@ -106,7 +106,7 @@ export async function processText(
   for (const action of actions) {
     if (action.type !== "send_text") {
       log(`ignoring ${action.type} action, not a text action`);
-    } else if (action.person_id !== who.person_id) {
+    } else if (action.person_id !== who.person_id && normalizePhone(action.to ?? "") !== normalizePhone(phone)) {
       log(`send_text for ${action.person_id} not sent yet, sender is ${who.person_id}`);
     } else {
       await send(action.text);
