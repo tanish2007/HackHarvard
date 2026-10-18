@@ -6,7 +6,7 @@
  * 911" button), and the local demo controls POST /admin/alert and
  * POST /admin/reset.
  */
-import express, { Router, type Request, type Response } from "express";
+import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import type { HazardWatcher } from "./alerts/watcher.js";
 import type { EscalationEngine } from "./escalation/engine.js";
@@ -31,8 +31,9 @@ import type { IncidentStore } from "./state/store.js";
  *         POST /admin/alert answers 503.
  *     escalation (EscalationEngine | undefined): Runs check-in chains and the
  *         confirmed 911 call. Without it, no chains run and confirm answers 503.
- *     adminToken (string | undefined): If set, /admin routes need it in the
- *         x-relay-admin header. Unset leaves them open, for a laptop demo.
+ *     adminToken (string | undefined): If set, /admin routes and the 911
+ *         confirm need it in the x-relay-admin header. Unset leaves them
+ *         open, for a laptop demo.
  */
 export interface CoreDeps {
   scenario: Scenario;
@@ -100,6 +101,26 @@ export const jsonBody = express.json({ limit: "1mb" });
 export function createCoreRouter(deps: CoreDeps): Router {
   const router = Router();
 
+  /**
+   * Refuse a request without the admin token, if one is set.
+   *
+   * Guards the demo controls and the 911 confirm, so neither can be
+   * triggered by anyone who finds the server through a tunnel.
+   *
+   * Args:
+   *     req (Request): The request.
+   *     res (Response): The response. Gets CORS headers either way.
+   *     next (NextFunction): Continues to the route.
+   */
+  const requireAdmin = (req: Request, res: Response, next: NextFunction): void => {
+    allowCors(res);
+    if (deps.adminToken && req.get("x-relay-admin") !== deps.adminToken) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    next();
+  };
+
   router.get("/health", (_req, res) => {
     res.json({ status: "ok", incident: deps.scenario.incident.name });
   });
@@ -131,9 +152,9 @@ export function createCoreRouter(deps: CoreDeps): Router {
   router.options("/escalations/:person_id/confirm", preflight);
   router.post(
     "/escalations/:person_id/confirm",
+    requireAdmin,
     jsonBody,
     asyncHandler(async (req, res) => {
-      allowCors(res);
       if (!deps.escalation) {
         res.status(503).json({ error: "escalation_off" });
         return;
@@ -156,14 +177,7 @@ export function createCoreRouter(deps: CoreDeps): Router {
 
   // Local demo controls. Optional token, in case the server is ever tunnelled.
   router.options("/admin/:action", preflight);
-  router.use("/admin", (req, res, next) => {
-    allowCors(res);
-    if (deps.adminToken && req.get("x-relay-admin") !== deps.adminToken) {
-      res.status(403).json({ error: "forbidden" });
-      return;
-    }
-    next();
-  });
+  router.use("/admin", requireAdmin);
 
   router.post(
     "/admin/alert",
