@@ -7,8 +7,9 @@
  */
 import { randomUUID } from "node:crypto";
 
+import { isDistress } from "./commands.js";
 import type { CoreResponse, RelayEvent } from "./contracts.js";
-import { ACKNOWLEDGED, handleText } from "./handler.js";
+import { ACKNOWLEDGED, SOS_RECEIVED, handleText } from "./handler.js";
 import type { PeopleDirectory } from "./people.js";
 import type { Registry } from "./registry.js";
 
@@ -25,21 +26,30 @@ export interface RelayDeps {
 }
 
 /**
- * Work out every reply for one incoming text.
+ * Handle one incoming text and send every reply through `send`.
+ *
+ * Replies are sent as soon as each is ready. For a call for help, the
+ * acknowledgement goes out while the event is already on its way to Core, so a
+ * slow Core never delays the first reply.
  *
  * Args:
  *     deps: The registry, phone lookup and Core client.
  *     phone: The sender's phone number in E.164 format.
  *     text: The message text.
- *
- * Returns:
- *     string[]: Texts to send back to the sender, in order. Never empty, so the
- *         sender is not left without a reply if Core is down.
+ *     send: Sends one text back to the sender.
  */
-export async function processText(deps: RelayDeps, phone: string, text: string): Promise<string[]> {
+export async function processText(
+  deps: RelayDeps,
+  phone: string,
+  text: string,
+  send: (reply: string) => Promise<void>,
+): Promise<void> {
   const log = deps.log ?? ((m: string) => console.warn(m));
   const reply = handleText(deps.registry, phone, text);
-  if (reply !== null) return [reply];
+  if (reply !== null) {
+    await send(reply);
+    return;
+  }
 
   const who = deps.directory.resolve(phone);
   const event: RelayEvent = {
@@ -53,16 +63,23 @@ export async function processText(deps: RelayDeps, phone: string, text: string):
     timestamp: (deps.now?.() ?? new Date()).toISOString(),
   };
 
-  const { actions } = await deps.postEvent(event);
-  const replies: string[] = [];
+  // Start the Core call first, then acknowledge while it is in flight.
+  const pending = deps.postEvent(event);
+  if (isDistress(text)) await send(SOS_RECEIVED);
+  const { actions } = await pending;
+
+  let sent = 0;
   for (const action of actions) {
     if (action.type !== "send_text") {
       log(`ignoring ${action.type} action, not a text action`);
     } else if (action.person_id !== who.person_id) {
       log(`send_text for ${action.person_id} not sent yet, sender is ${who.person_id}`);
     } else {
-      replies.push(action.text);
+      await send(action.text);
+      sent += 1;
     }
   }
-  return replies.length > 0 ? replies : [ACKNOWLEDGED];
+
+  // Nobody is left without a reply, even if Core is down or has nothing to say.
+  if (sent === 0 && !isDistress(text)) await send(ACKNOWLEDGED);
 }
