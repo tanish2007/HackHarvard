@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createCoreRouter } from "../src/app.js";
 import { asyncHandler, jsonErrorHandler } from "../src/lib/asyncHandler.js";
 import { loadScenario } from "../src/scenario/load.js";
+import { IncidentStore } from "../src/state/store.js";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 
@@ -19,9 +20,21 @@ const ROOT = join(import.meta.dirname, "..", "..");
  */
 function coreApp(): express.Express {
   const app = express();
-  app.use(createCoreRouter({ scenario: loadScenario({ dir: ROOT, useLocal: false }) }));
+  const scenario = loadScenario({ dir: ROOT, useLocal: false });
+  app.use(createCoreRouter({ scenario, store: new IncidentStore(scenario) }));
   return app;
 }
+
+describe("GET /state", () => {
+  it("serves Contract D, open to other origins and never cached", async () => {
+    const res = await request(coreApp()).get("/state");
+    expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.body.incident.name).toBe("Oak Ridge Fire");
+    expect(Array.isArray(res.body.people)).toBe(true);
+  });
+});
 
 describe("GET /health", () => {
   it("returns ok and the incident name", async () => {
