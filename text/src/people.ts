@@ -43,6 +43,7 @@ export function normalizePhone(phone: string): string {
 /** Lookup of people by phone number. */
 export class PeopleDirectory {
   private readonly byPhone = new Map<string, KnownPerson>();
+  private readonly byId = new Map<string, KnownPerson>();
 
   /**
    * Build the directory.
@@ -51,7 +52,25 @@ export class PeopleDirectory {
    *     people: Everyone in the scenario who has a phone number.
    */
   constructor(people: KnownPerson[]) {
-    for (const person of people) this.byPhone.set(normalizePhone(person.phone), person);
+    for (const person of people) {
+      this.byPhone.set(normalizePhone(person.phone), person);
+      this.byId.set(person.person_id, person);
+    }
+  }
+
+  /**
+   * Find the phone number for a person, to text them first.
+   *
+   * Args:
+   *     personId: A person_id from the scenario, such as "p_amit".
+   *
+   * Returns:
+   *     string | null: Their phone number, or null if the scenario has no
+   *         number for them (for example a simulated resident).
+   */
+  phoneFor(personId: string): string | null {
+    const person = this.byId.get(personId);
+    return person ? normalizePhone(person.phone) : null;
   }
 
   /**
