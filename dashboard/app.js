@@ -1,12 +1,15 @@
 const POLL_MS = 2000;
+const NAME_KEY = "relay-confirmed-by";
 const params = new URLSearchParams(location.search);
 const stateUrl = params.get("state") || "/state";
+let coreBase = "http://localhost:3000";
+let adminToken = "";
 
 const STATUS_COLOR = {
-  safe: "#3ecf8e",
-  unconfirmed: "#f0b429",
-  sos: "#ff6b5a",
-  en_route: "#7eb6ff",
+  safe: "#22c55e",
+  unconfirmed: "#f59e0b",
+  sos: "#ef4444",
+  en_route: "#3b82f6",
 };
 
 const ZONE_STYLE = {
@@ -43,8 +46,15 @@ const peopleLayers = new Map();
 const reportLayers = new Map();
 const unitLayers = new Map();
 const volunteerLayers = new Map();
+let routeGlow = null;
 let routeLine = null;
+let routeOrigin = null;
+let routeDest = null;
+let routeChip = null;
+let routeMeta = null;
+let perimeterKey = "";
 let fitted = false;
+let feedStick = true;
 let lastState = null;
 let statusFilter = "";
 let windowHours = 24;
@@ -123,17 +133,98 @@ function languageName(code) {
 function showBanner(text, backup) {
   const banner = document.getElementById("banner");
   const mode = document.getElementById("mode");
+  const label = mode.querySelector(".mode-label");
   if (!text) {
     banner.hidden = true;
     banner.textContent = "";
-    mode.textContent = "Live";
     mode.className = "live";
+    if (label) label.textContent = "Live";
+    else mode.textContent = "Live";
     return;
   }
   banner.hidden = false;
   banner.textContent = text;
-  mode.textContent = backup ? "Backup" : "Live";
   mode.className = backup ? "backup" : "live";
+  if (label) label.textContent = backup ? "Backup" : "Live";
+  else mode.textContent = backup ? "Backup" : "Live";
+}
+
+function updatedPhrase(iso) {
+  if (!iso) return "Updated just now";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "Updated just now";
+  const sec = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (sec < 1) return "Updated just now";
+  if (sec < 60) return "Updated " + sec + "s ago";
+  const min = Math.round(sec / 60);
+  if (min < 60) return "Updated " + min + "m ago";
+  const hr = Math.round(min / 60);
+  if (hr < 48) return "Updated " + hr + "h ago";
+  return "Updated " + iso;
+}
+
+function clock(iso) {
+  const then = Date.parse(iso);
+  if (!iso || Number.isNaN(then)) return "--:--:--";
+  return new Date(then).toLocaleTimeString("en-GB", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function esc(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
+
+function rosterShare(count, total) {
+  if (!total) return 0;
+  return Math.round((Number(count) || 0) / total * 100);
+}
+
+function weatherChip(wind) {
+  if (!wind || wind.wind_mph == null || !wind.wind_dir) return "Weather unavailable";
+  const mph = Number(wind.wind_mph);
+  const mphText = Number.isInteger(mph) ? String(mph) : String(Math.round(mph * 10) / 10);
+  const temp = Math.round(Number(wind.temp_f));
+  let source = "NWS";
+  if (wind.source === "fallback") source = "BACKUP";
+  else if (wind.source && wind.source !== "nws") source = String(wind.source).toUpperCase();
+  return mphText + " mph from " + wind.wind_dir + " · " + temp + "°F · " + source;
+}
+
+function organicRing(lat, lng, radiusKm) {
+  const steps = 72;
+  const ring = [];
+  const latRad = lat * Math.PI / 180;
+  const radius = Number(radiusKm) > 0 ? Number(radiusKm) : 1.2;
+  for (let i = 0; i < steps; i += 1) {
+    const t = (i / steps) * Math.PI * 2;
+    const lobe = 1
+      + 0.18 * Math.sin(2 * t + 0.6)
+      + 0.1 * Math.sin(5 * t + 1.4)
+      + 0.06 * Math.cos(7 * t + 0.2);
+    const meters = radius * lobe;
+    const dLat = (meters / 111.32) * Math.cos(t);
+    const dLng = (meters / (111.32 * Math.max(0.2, Math.cos(latRad)))) * Math.sin(t);
+    ring.push([lat + dLat, lng + dLng]);
+  }
+  return ring;
+}
+
+function isRouteOrigin(person) {
+  return !!(routeMeta && person && person.name === routeMeta.person_name);
+}
+
+function isRouteShelter(shelter) {
+  return !!(routeMeta && shelter && shelter.name && shelter.name === routeMeta.shelter_name);
 }
 
 function goTo(lat, lng, zoom) {
@@ -155,17 +246,8 @@ function holdMapClick() {
 function paintWind() {
   const el = document.getElementById("wind-readout");
   const wind = picture.wind;
-  if (!wind || !wind.wind_dir || !wind.wind_mph) {
-    el.textContent = "Wind unavailable";
-    return;
-  }
-  const source = wind.source === "nws"
-    ? "NWS"
-    : wind.source === "fallback"
-      ? "backup forecast"
-      : "scenario forecast";
-  el.textContent = wind.wind_mph + " mph from " + wind.wind_dir + ", "
-    + Math.round(wind.temp_f) + " F, " + source;
+  el.textContent = weatherChip(wind);
+  if (wind && wind.summary) el.title = wind.summary;
 }
 
 function zoneLevel(zone, fire) {
@@ -181,28 +263,33 @@ function zoneLevel(zone, fire) {
 }
 
 function syncZones(hazardsRows) {
+  const fire = picture.fire || (hazardsRows || []).find((hazard) => hazard.kind === "fire");
+  if (!fire || fire.lat == null || fire.lng == null) {
+    perimeterKey = "";
+    zoneLayer.clearLayers();
+    return;
+  }
+  const key = fire.lat + "," + fire.lng + "," + fire.radius_km;
+  if (key === perimeterKey && zoneLayer.getLayers().length) return;
+  perimeterKey = key;
   zoneLayer.clearLayers();
-  const fire = (hazardsRows || []).find((hazard) => hazard.kind === "fire") || picture.fire;
-  picture.zones.forEach((zone) => {
-    if (!Array.isArray(zone.polygon) || zone.polygon.length < 3) return;
-    const level = fire ? zoneLevel(zone, fire) : "watch";
-    const style = ZONE_STYLE[level];
-    const polygon = L.polygon(zone.polygon, {
-      pane: "zones",
-      color: style.color,
-      weight: 2,
-      fillColor: style.fillColor,
-      fillOpacity: style.fillOpacity,
-    });
-    polygon.bindTooltip(zone.name + ", " + style.label);
-    polygon.on("click", () => {
-      holdMapClick();
-      const bounds = polygon.getBounds();
-      if (reduceMotion()) map.fitBounds(bounds, { padding: [36, 36], animate: false });
-      else map.fitBounds(bounds, { padding: [36, 36], maxZoom: 14 });
-    });
-    polygon.addTo(zoneLayer);
+  const polygon = L.polygon(organicRing(fire.lat, fire.lng, fire.radius_km), {
+    pane: "zones",
+    color: "#ef4444",
+    weight: 2,
+    dashArray: "6, 6",
+    fillColor: "#dc2626",
+    fillOpacity: 0.12,
+    className: "evac-perimeter",
   });
+  polygon.bindTooltip("Evacuation perimeter");
+  polygon.on("click", () => {
+    holdMapClick();
+    const bounds = polygon.getBounds();
+    if (reduceMotion()) map.fitBounds(bounds, { padding: [36, 36], animate: false });
+    else map.fitBounds(bounds, { padding: [36, 36], maxZoom: 14 });
+  });
+  polygon.addTo(zoneLayer);
 }
 
 function hazardInWindow(hazard) {
@@ -220,12 +307,29 @@ function render(state) {
     }
   });
   lastState = state;
-  document.getElementById("incident-name").textContent = state.incident.name;
-  document.getElementById("updated").textContent = "Updated " + ago(state.incident.updated_at);
-  document.getElementById("count-safe").textContent = state.counts.safe;
-  document.getElementById("count-unconfirmed").textContent = state.counts.unconfirmed;
-  document.getElementById("count-sos").textContent = state.counts.sos;
-  document.getElementById("count-en-route").textContent = state.counts.en_route || 0;
+  const incidentName = state.incident && state.incident.name ? state.incident.name : "Incident";
+  document.getElementById("incident-name").textContent =
+    "RELAY // " + incidentName.toUpperCase() + " INCIDENT COMMAND";
+  document.title = "Relay // " + incidentName + " incident command";
+  document.getElementById("updated").textContent = updatedPhrase(state.incident.updated_at);
+  const counts = state.counts || {};
+  const roster = (Number(counts.safe) || 0)
+    + (Number(counts.unconfirmed) || 0)
+    + (Number(counts.sos) || 0)
+    + (Number(counts.en_route) || 0);
+  document.getElementById("count-safe").textContent = counts.safe;
+  document.getElementById("count-unconfirmed").textContent = counts.unconfirmed;
+  document.getElementById("count-sos").textContent = counts.sos;
+  document.getElementById("count-en-route").textContent = counts.en_route || 0;
+  document.getElementById("count-safe-sub").textContent =
+    rosterShare(counts.safe, roster) + "% of active roster accounted for";
+  document.getElementById("count-unconfirmed-sub").textContent =
+    rosterShare(counts.unconfirmed, roster) + "% of active roster still unconfirmed";
+  document.getElementById("count-sos-sub").textContent =
+    rosterShare(counts.sos, roster) + "% of active roster in distress";
+  document.getElementById("count-en-route-sub").textContent =
+    rosterShare(counts.en_route, roster) + "% of active roster en route";
+  document.querySelector(".count.sos").classList.toggle("is-hot", Number(counts.sos) > 0);
 
   const visibleHazards = state.hazards.filter(hazardInWindow);
   syncHazards(visibleHazards);
@@ -248,9 +352,12 @@ function render(state) {
     state.hazards.forEach((hazard) => bounds.push([hazard.lat, hazard.lng]));
     state.reports.forEach((report) => bounds.push([report.lat, report.lng]));
     state.volunteers.forEach((volunteer) => bounds.push([volunteer.lat, volunteer.lng]));
-    picture.zones.forEach((zone) => zone.polygon.forEach((point) => bounds.push(point)));
+    if (picture.fire) bounds.push([picture.fire.lat, picture.fire.lng]);
     if (bounds.length) {
-      map.fitBounds(bounds, { padding: [32, 32] });
+      map.fitBounds(bounds, {
+        paddingTopLeft: [40, 40],
+        paddingBottomRight: [40, 96],
+      });
       fitted = true;
     }
     requestAnimationFrame(() => map.invalidateSize());
@@ -295,6 +402,13 @@ function syncShelters(rows) {
   rows.forEach((shelter) => {
     const key = shelter.id;
     seen.add(key);
+    if (isRouteShelter(shelter)) {
+      if (shelterLayers.has(key)) {
+        shelters.removeLayer(shelterLayers.get(key));
+        shelterLayers.delete(key);
+      }
+      return;
+    }
     const tooltip = shelter.name + ", " + shelter.capacity_note;
     const existing = shelterLayers.get(key);
     if (existing) {
@@ -304,10 +418,10 @@ function syncShelters(rows) {
     }
     const layer = L.circleMarker([shelter.lat, shelter.lng], {
       pane: "residents",
-      radius: 7,
-      color: "#5ee0d0",
+      radius: 6,
+      color: "#34d399",
       weight: 2,
-      fillColor: "#0e3f3c",
+      fillColor: "#059669",
       fillOpacity: 0.95,
     }).bindTooltip(tooltip);
     layer.on("click", () => {
@@ -326,6 +440,13 @@ function syncPeople(rows) {
   rows.forEach((person) => {
     const key = person.person_id;
     seen.add(key);
+    if (isRouteOrigin(person)) {
+      if (peopleLayers.has(key)) {
+        people.removeLayer(peopleLayers.get(key));
+        peopleLayers.delete(key);
+      }
+      return;
+    }
     const selected = inspector && inspector.key === "person:" + key;
     const tooltip = person.name + ", " + statusLabel(person.status);
     const existing = peopleLayers.get(key);
@@ -505,6 +626,7 @@ function personModel(person, state) {
     status: person.status,
     lat: person.lat,
     lng: person.lng,
+    personId: person.person_id,
     rows: [
       ["Status", statusLabel(person.status)],
       ["Phone", picture.phones[person.person_id] || "No phone in the scenario"],
@@ -673,9 +795,12 @@ function buildCards(state) {
       title: person.name,
       detail: statusLabel(person.status),
       time: ago(person.last_contact),
+      iso: person.last_contact,
       pin: person.status === "sos" ? 0 : 1,
+      at: Date.parse(person.last_contact) || 0,
       lat: person.lat,
       lng: person.lng,
+      personId: person.person_id,
     });
   });
   state.reports.forEach((report) => {
@@ -685,7 +810,9 @@ function buildCards(state) {
       title: statusLabel(report.kind),
       detail: report.text,
       time: ago(report.at),
+      iso: report.at,
       pin: 0,
+      at: Date.parse(report.at) || 0,
       lat: report.lat,
       lng: report.lng,
     });
@@ -698,6 +825,7 @@ function buildCards(state) {
       title: entry.who || "Update",
       detail: entry.text,
       time: ago(entry.at),
+      iso: entry.at,
       pin: 2,
       at: Date.parse(entry.at) || 0,
       lat: spot ? spot.lat : null,
@@ -709,9 +837,11 @@ function buildCards(state) {
       key: "hazard:" + hazard.id,
       kind: hazard.kind,
       title: statusLabel(hazard.kind) + ", " + hazard.severity,
-      detail: hazard.radius_km + " km, " + hazard.source,
+      detail: "Severity " + hazard.severity + ", radius " + hazard.radius_km + " km.",
       time: hazard.updated_at ? ago(hazard.updated_at) : "Standing",
+      iso: hazard.updated_at,
       pin: 3,
+      at: Date.parse(hazard.updated_at) || 0,
       lat: hazard.lat,
       lng: hazard.lng,
       zoom: 13,
@@ -748,63 +878,148 @@ function buildCards(state) {
         kind: "unit",
         title: unit.name,
         detail: unit.lat == null ? "No position yet" : "On the map",
-        time: ago(unit.last_heard),
-        pin: 4,
+      time: ago(unit.last_heard),
+      iso: unit.last_heard,
+      at: Date.parse(unit.last_heard) || 0,
+      pin: 4,
         lat: unit.lat,
         lng: unit.lng,
       });
     });
   }
   cards.sort((left, right) => {
+    const leftDated = left.at > 0;
+    const rightDated = right.at > 0;
+    if (leftDated && rightDated) return left.at - right.at;
+    if (leftDated !== rightDated) return leftDated ? 1 : -1;
     if (left.pin !== right.pin) return left.pin - right.pin;
-    return (right.at || 0) - (left.at || 0);
+    return String(left.title || "").localeCompare(String(right.title || ""));
   });
   return cards;
 }
 
+function channelMeta(kind) {
+  const name = String(kind || "").toLowerCase();
+  if (name === "radio" || name === "voice" || name === "unit") {
+    return { id: "radio", label: "GMRS RADIO" };
+  }
+  if (name === "imessage" || name === "sms" || name === "sos" || name === "en_route" || name === "report") {
+    return { id: "sms", label: "SMS / iMSG" };
+  }
+  if (name === "fire") return { id: "firms", label: "FIRMS SATELLITE" };
+  if (name === "weather") return { id: "nws", label: "NWS" };
+  return { id: "system", label: "SYSTEM AUTO-CHECKIN" };
+}
+
+function senderFor(card) {
+  const title = card.title || "System Agent";
+  const kind = String(card.kind || "").toLowerCase();
+  if (kind === "fire" || kind === "weather" || kind === "system") return "System Agent";
+  if (kind === "unit" || ((kind === "radio" || kind === "voice") && /unit/i.test(title))) {
+    return title + " (Search & Rescue)";
+  }
+  if (kind === "volunteer") return title + " (Volunteer)";
+  if (kind === "safe" || kind === "unconfirmed" || kind === "sos" || kind === "en_route"
+    || kind === "imessage" || kind === "sms") {
+    return title + " (Resident)";
+  }
+  return title;
+}
+
+function messageFor(card) {
+  const kind = String(card.kind || "").toLowerCase();
+  if (kind === "unconfirmed") return "No check-in yet. Still marked unconfirmed.";
+  if (kind === "safe") return "Checked in safe.";
+  if (kind === "sos") return "SOS received. Needs a responder now.";
+  if (kind === "en_route") return "Moving toward shelter.";
+  if (kind === "unit") {
+    return card.detail === "No position yet"
+      ? "No position has checked in."
+      : "Unit is on the map.";
+  }
+  if (kind === "volunteer") {
+    if (!card.detail || card.detail === "Volunteer") return "Volunteer is available.";
+    return card.detail;
+  }
+  if (kind === "shelter") {
+    if (!card.detail || /openstreetmap/i.test(card.detail)) return "Shelter is open.";
+    return card.detail;
+  }
+  return card.detail || "Update received.";
+}
+
 function paintFeed(state) {
   const cards = buildCards(state);
-  const key = JSON.stringify(cards.map((card) => [card.key, card.title, card.detail, card.time]));
+  const count = document.getElementById("feed-count");
+  if (count) count.textContent = String(cards.length);
+  const key = JSON.stringify(cards.map((card) => [card.key, card.title, card.detail, card.kind]));
   const list = document.getElementById("feed");
   if (key !== feedKey) {
     feedKey = key;
-    const scroll = list.scrollTop;
     list.replaceChildren();
     if (!cards.length) {
       const empty = document.createElement("li");
       empty.className = "empty";
-      empty.textContent = "Nothing in this window.";
+      empty.textContent = "No dispatch in this window.";
       list.append(empty);
     } else {
       cards.forEach((card) => list.append(feedItem(card)));
-      list.scrollTop = scroll;
+      if (feedStick) {
+        requestAnimationFrame(() => {
+          const top = list.scrollHeight;
+          if (reduceMotion()) list.scrollTop = top;
+          else list.scrollTo({ top: top, behavior: "smooth" });
+        });
+      }
     }
   }
   markFeedSelection();
 }
 
 function feedItem(card) {
+  const meta = channelMeta(card.kind);
   const item = document.createElement("li");
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.key = card.key;
-  const kind = document.createElement("span");
-  kind.className = "kind " + card.kind;
-  kind.textContent = statusLabel(card.kind) || card.kind;
+  const top = document.createElement("span");
+  top.className = "log-top";
   const time = document.createElement("time");
-  time.textContent = card.time;
-  const title = document.createElement("strong");
-  title.textContent = card.title;
-  const detail = document.createElement("span");
-  detail.className = "detail";
-  detail.textContent = card.detail;
-  button.append(kind, time, title, detail);
+  if (card.iso) time.dateTime = card.iso;
+  time.textContent = clock(card.iso);
+  const badge = document.createElement("span");
+  badge.className = "badge badge-" + meta.id;
+  badge.textContent = meta.label;
+  top.append(time, badge);
+  const who = document.createElement("span");
+  who.className = "log-who";
+  who.textContent = senderFor(card);
+  const text = document.createElement("span");
+  text.className = "log-text";
+  text.textContent = "\u201C" + messageFor(card) + "\u201D";
+  button.append(top, who, text);
   button.addEventListener("click", () => {
     const model = modelByKey(card.key, lastState);
     if (model) openInspector(model, true);
-    if (card.lat != null && card.lng != null) goTo(card.lat, card.lng, card.zoom);
+    if (card.lat != null && card.lng != null) goTo(card.lat, card.lng, card.zoom || 15);
   });
-  item.append(button);
+  if (card.kind === "sos" && card.personId) {
+    const row = document.createElement("div");
+    row.className = "feed-row";
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "confirm-sos";
+    confirm.textContent = "Confirm 911 call";
+    confirm.addEventListener("click", () => {
+      const model = modelByKey(card.key, lastState);
+      if (model) openInspector(model, true);
+      confirmPerson(card.personId);
+    });
+    row.append(button, confirm);
+    item.append(row);
+  } else {
+    item.append(button);
+  }
   return item;
 }
 
@@ -829,6 +1044,94 @@ function fillDrawer(model) {
     value.textContent = pair[1];
     rows.append(term, value);
   });
+  syncDrawerConfirm(model);
+}
+
+function syncDrawerConfirm(model) {
+  const box = document.getElementById("drawer-confirm");
+  const show = !!(model && model.status === "sos" && model.personId);
+  box.hidden = !show;
+  if (!show) return;
+  if (box.dataset.personId !== model.personId) {
+    box.dataset.personId = model.personId;
+    const note = document.getElementById("confirm-note");
+    const button = document.getElementById("confirm-sos");
+    note.textContent = "";
+    button.disabled = false;
+  }
+}
+
+function responderName() {
+  const input = document.getElementById("confirmed-by");
+  return input ? input.value.trim() : "";
+}
+
+async function confirmPerson(personId) {
+  const note = document.getElementById("confirm-note");
+  const button = document.getElementById("confirm-sos");
+  const name = responderName();
+  if (!name) {
+    document.getElementById("drawer-confirm").hidden = false;
+    note.textContent = "Enter the responder name.";
+    document.getElementById("confirmed-by").focus();
+    return;
+  }
+  button.disabled = true;
+  note.textContent = "Calling Core.";
+  const headers = { "Content-Type": "application/json" };
+  if (adminToken) headers["x-relay-admin"] = adminToken;
+  try {
+    const response = await fetch(
+      coreBase + "/escalations/" + encodeURIComponent(personId) + "/confirm",
+      {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify({ confirmed_by: name }),
+      },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 404) {
+      note.textContent = "Unknown person.";
+      button.disabled = false;
+      return;
+    }
+    if (response.status === 409) {
+      note.textContent = body.error === "already_confirmed"
+        ? "Already confirmed."
+        : "Not in SOS.";
+      button.disabled = body.error === "already_confirmed";
+      return;
+    }
+    if (response.status === 503) {
+      note.textContent = "Escalation is off.";
+      button.disabled = false;
+      return;
+    }
+    if (response.status === 400) {
+      note.textContent = "Name was rejected. Do not include a phone number.";
+      button.disabled = false;
+      return;
+    }
+    if (response.status === 403) {
+      note.textContent = "Admin token was rejected.";
+      button.disabled = false;
+      return;
+    }
+    if (!response.ok || body.ok !== true) {
+      note.textContent = "Confirm failed.";
+      button.disabled = false;
+      return;
+    }
+    if (body.delivered === false) {
+      note.textContent = "Not delivered. Press again.";
+      button.disabled = false;
+      return;
+    }
+    note.textContent = "Call placed.";
+  } catch (err) {
+    note.textContent = "Core did not answer. Press again.";
+    button.disabled = false;
+  }
 }
 
 function openInspector(model, focus) {
@@ -1074,10 +1377,29 @@ function bindChrome() {
   document.getElementById("basemap-dark").addEventListener("click", () => setBasemap("dark"));
   document.getElementById("basemap-sat").addEventListener("click", () => setBasemap("sat"));
   document.getElementById("drawer-close").addEventListener("click", () => closeDrawer());
+  const nameInput = document.getElementById("confirmed-by");
+  nameInput.value = sessionStorage.getItem(NAME_KEY) || "";
+  nameInput.addEventListener("input", () => {
+    sessionStorage.setItem(NAME_KEY, nameInput.value);
+  });
+  document.getElementById("confirm-sos").addEventListener("click", () => {
+    const personId = document.getElementById("drawer-confirm").dataset.personId;
+    if (personId) confirmPerson(personId);
+  });
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeDrawer();
   });
   window.addEventListener("resize", () => map.invalidateSize());
+  const feed = document.getElementById("feed");
+  feed.addEventListener("scroll", () => {
+    feedStick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 72;
+  });
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(() => {
+      if (map) map.invalidateSize();
+    });
+    observer.observe(document.getElementById("map"));
+  }
 }
 
 async function fetchPicture() {
@@ -1102,6 +1424,8 @@ function initMap() {
   map.getPane("wind").style.pointerEvents = "none";
   map.createPane("residents");
   map.getPane("residents").style.zIndex = 640;
+  map.createPane("hud");
+  map.getPane("hud").style.zIndex = 680;
   if (picture.fire) map.setView([picture.fire.lat, picture.fire.lng], 13);
   else map.setView([0, 0], 2);
   setBasemap("dark");
@@ -1137,8 +1461,175 @@ async function loadForecast() {
     const next = forecast.next_2h || "";
     document.getElementById("forecast-next").textContent =
       next && next !== forecast.summary ? next : "";
+    const chip = document.getElementById("wind-readout");
+    chip.textContent = weatherChip(forecast);
+    chip.title = [forecast.summary, next].filter(Boolean).join(". ");
   } catch (err) {
     return;
+  }
+}
+
+function milesLabel(km) {
+  const miles = Number(km) * 0.621371;
+  if (!Number.isFinite(miles)) return "0.0";
+  return miles.toFixed(1);
+}
+
+function overlapLabel(route) {
+  const count = (route.avoided_hazards || []).length;
+  if (!count) return "Zero Hazard Overlap";
+  if (count === 1) return "1 Hazard Overlap";
+  return count + " Hazard Overlap";
+}
+
+function routeChipText(route) {
+  return route.duration_min + " min · " + milesLabel(route.distance_km) + " mi · " + overlapLabel(route);
+}
+
+function capacityPhrase(name) {
+  const rows = (lastState && lastState.shelters) || [];
+  const shelter = rows.find((row) => row.name === name);
+  const note = shelter && shelter.capacity_note ? String(shelter.capacity_note) : "";
+  const pct = note.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (pct) return "Capacity: " + pct[1] + "%";
+  return "";
+}
+
+function originIcon(name) {
+  return L.divIcon({
+    className: "origin-pin",
+    html: "<span class='aura'></span><span class='aura late'></span><span class='core'></span>"
+      + "<span class='pin-label'>" + esc(name) + " (Current Location)</span>",
+    iconSize: [240, 32],
+    iconAnchor: [16, 16],
+  });
+}
+
+function shelterIcon(name) {
+  const cap = capacityPhrase(name);
+  const mark = "<svg viewBox='0 0 24 24' width='14' height='14' aria-hidden='true'>"
+    + "<path fill='currentColor' d='M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5z'/></svg>";
+  const capHtml = "<em>" + esc(cap || "Shelter") + "</em>";
+  return L.divIcon({
+    className: "shelter-pin",
+    html: "<span class='pill'><span class='mark'>" + mark + "</span><span><strong>"
+      + esc(name || "Shelter") + "</strong>" + capHtml + "</span></span>",
+    iconSize: [250, 40],
+    iconAnchor: [16, 20],
+  });
+}
+
+function chipIcon(text) {
+  return L.divIcon({
+    className: "route-hud",
+    html: "<span class='chip'>" + esc(text) + "</span>",
+    iconSize: [360, 24],
+    iconAnchor: [180, 58],
+  });
+}
+
+function clearRouteArt() {
+  [routeGlow, routeLine, routeOrigin, routeDest, routeChip].forEach((layer) => {
+    if (layer && map) map.removeLayer(layer);
+  });
+  routeGlow = null;
+  routeLine = null;
+  routeOrigin = null;
+  routeDest = null;
+  routeChip = null;
+}
+
+function syncRoutePeople() {
+  if (!lastState) return;
+  syncPeople(statusFilter
+    ? lastState.people.filter((person) => person.status === statusFilter)
+    : lastState.people);
+  syncShelters(lastState.shelters);
+}
+
+function drawRoute(route, line) {
+  const label = routeChipText(route);
+  document.getElementById("route-note").textContent =
+    (route.person_name || "Resident") + " to " + (route.shelter_name || "shelter")
+    + ", " + route.duration_min + " min";
+  if (!routeGlow) {
+    routeGlow = L.polyline(line, {
+      color: "#38bdf8",
+      weight: 8,
+      opacity: 0.25,
+      interactive: false,
+    }).addTo(map);
+  } else {
+    routeGlow.setLatLngs(line);
+  }
+  if (!routeLine) {
+    routeLine = L.polyline(line, {
+      color: "#f8fafc",
+      weight: 4,
+      opacity: 0.95,
+    }).bindTooltip(label).addTo(map);
+  } else {
+    routeLine.setLatLngs(line);
+    routeLine.setTooltipContent(label);
+  }
+  const start = line[0];
+  const end = line[line.length - 1];
+  const mid = line[Math.floor(line.length / 2)];
+  const originName = route.person_name || "Evacuee";
+  const shelterName = route.shelter_name || "Shelter";
+  if (!routeOrigin) {
+    routeOrigin = L.marker(start, { pane: "hud", icon: originIcon(originName), zIndexOffset: 900 }).addTo(map);
+    routeOrigin._label = originName;
+    routeOrigin.on("click", () => {
+      holdMapClick();
+      const ll = routeOrigin.getLatLng();
+      if (lastState && routeMeta) {
+        const person = lastState.people.find((row) => row.name === routeMeta.person_name);
+        if (person) openInspector(personModel(person, lastState), true);
+      }
+      goTo(ll.lat, ll.lng);
+    });
+  } else {
+    routeOrigin.setLatLng(start);
+    if (routeOrigin._label !== originName) {
+      routeOrigin.setIcon(originIcon(originName));
+      routeOrigin._label = originName;
+    }
+  }
+  if (!routeDest) {
+    routeDest = L.marker(end, { pane: "hud", icon: shelterIcon(shelterName), zIndexOffset: 880 }).addTo(map);
+    routeDest._label = shelterName;
+    routeDest.on("click", () => {
+      holdMapClick();
+      const ll = routeDest.getLatLng();
+      if (lastState && routeMeta) {
+        const shelter = lastState.shelters.find((row) => row.name === routeMeta.shelter_name);
+        if (shelter) openInspector(shelterModel(shelter), true);
+      }
+      goTo(ll.lat, ll.lng);
+    });
+  } else {
+    routeDest.setLatLng(end);
+    if (routeDest._label !== shelterName) {
+      routeDest.setIcon(shelterIcon(shelterName));
+      routeDest._label = shelterName;
+    }
+  }
+  if (!routeChip) {
+    routeChip = L.marker(mid, {
+      pane: "hud",
+      icon: chipIcon(label),
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 600,
+    }).addTo(map);
+    routeChip._text = label;
+  } else {
+    routeChip.setLatLng(mid);
+    if (routeChip._text !== label) {
+      routeChip.setIcon(chipIcon(label));
+      routeChip._text = label;
+    }
   }
 }
 
@@ -1146,20 +1637,17 @@ async function loadRoute() {
   try {
     const route = await fetch("/route", { cache: "no-store" }).then(readJson);
     const line = (route.polyline || []).map((point) => [point.lat, point.lng]);
-    const note = document.getElementById("route-note");
     if (!line.length) {
-      note.textContent = "";
+      routeMeta = null;
+      document.getElementById("route-note").textContent = "";
+      clearRouteArt();
+      syncRoutePeople();
       return;
     }
-    const label = route.person_name + " to " + route.shelter_name + ", " + route.duration_min + " min";
-    note.textContent = label;
-    if (routeLine) {
-      routeLine.setLatLngs(line);
-      routeLine.setTooltipContent(label);
-      return;
-    }
-    routeLine = L.polyline(line, { color: "#f4f7fb", weight: 4, opacity: 0.9 }).bindTooltip(label);
-    routeLine.addTo(map);
+    routeMeta = route;
+    if (!map) return;
+    drawRoute(route, line);
+    syncRoutePeople();
   } catch (err) {
     return;
   }
@@ -1181,12 +1669,23 @@ async function tick() {
   }
 }
 
+async function loadClientConfig() {
+  try {
+    const config = await fetch("/client-config", { cache: "no-store" }).then(readJson);
+    if (config.core) coreBase = String(config.core).replace(/\/$/, "");
+    adminToken = config.admin_token || "";
+  } catch (err) {
+    adminToken = "";
+  }
+}
+
 async function boot() {
   try {
     await fetchPicture();
   } catch (err) {
     picture.wind = null;
   }
+  await loadClientConfig();
   try {
     initMap();
     bindChrome();
@@ -1196,6 +1695,10 @@ async function boot() {
     return;
   }
   setInterval(tick, POLL_MS);
+  setInterval(() => {
+    if (!lastState || !lastState.incident) return;
+    document.getElementById("updated").textContent = updatedPhrase(lastState.incident.updated_at);
+  }, 1000);
   setInterval(async () => {
     try {
       await fetchPicture();
