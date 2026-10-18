@@ -14,11 +14,17 @@ import express, { Router } from "express";
 import { asyncHandler } from "./asyncHandler.js";
 import { lastUserText, parseCallContext, type ChatMessage } from "./llmRequest.js";
 import type { CallPlacer, CallSession } from "./ports.js";
-import { silenceStream, speechStream } from "./sse.js";
+import { continuationStream, openingChunk, silenceStream, speechStream } from "./sse.js";
 import { handleUtterance, type UtteranceDeps } from "./utterance.js";
 
 /** What a voice caller hears if Core cannot be reached. */
 export const FALLBACK_SPEECH = "Sorry, I lost my connection for a moment. Please say that again.";
+
+/** What a phone caller hears while Core is still thinking. The trailing space matters to the voice. */
+export const FILLER_SPEECH = "One moment... ";
+
+/** How long Core can take before the caller hears the filler, in milliseconds. */
+export const FILLER_DELAY_MS = 1500;
 
 /** Model name that marks the always-open radio call. Anything else is a phone call. */
 export const RADIO_MODEL = "relay-radio";
@@ -33,6 +39,10 @@ export interface LlmRouterDeps {
   placer: CallPlacer;
   /** Fetch implementation for Core, injectable for tests. */
   fetchImpl?: typeof fetch;
+  /** How long to wait for Core before a phone caller hears the filler. Defaults to FILLER_DELAY_MS. */
+  fillerDelayMs?: number;
+  /** How long to wait for Core's answer in total. Defaults to the Core client's own default. */
+  coreTimeoutMs?: number;
   /** Logger. Defaults to console.warn. */
   log?: (msg: string) => void;
 }
@@ -100,35 +110,61 @@ export function createLlmRouter(deps: LlmRouterDeps): Router {
         placer: deps.placer,
         resolvePerson: () => null,
         fetchImpl: deps.fetchImpl,
+        coreTimeoutMs: deps.coreTimeoutMs,
         log,
       };
 
-      let reply: string;
       const text = lastUserText(messages);
       // ElevenLabs sends "..." while the caller is silent. That is not speech,
       // so it must not reach Core or get an answer.
-      if (!/[\p{L}\p{N}]/u.test(text)) {
-        reply = quiet("nothing said");
-      } else {
-        await handleUtterance(
-          {
-            channel,
-            from: context.callerNumber ?? "unknown",
-            personId: context.personId,
-            text,
-            session,
-          },
-          utteranceDeps,
-        );
-        if (said.length > 0) reply = speechStream(model, said.join(" "));
-        // A phone caller never gets dead air. Radio stays quiet on chatter.
-        else if (channel === "voice") reply = speechStream(model, FALLBACK_SPEECH);
-        else reply = quiet("radio chatter");
+      const silent = !/[\p{L}\p{N}]/u.test(text);
+
+      // A phone caller hears a filler if Core is slow. Radio never does, since
+      // Relay must stay quiet there unless it was addressed.
+      let fillerSent = false;
+      const setHeaders = (): void => {
+        res.status(200);
+        res.set("content-type", "text/event-stream");
+        res.set("cache-control", "no-cache");
+      };
+      const timer =
+        channel === "voice" && !silent
+          ? setTimeout(() => {
+              fillerSent = true;
+              setHeaders();
+              res.flushHeaders();
+              res.write(openingChunk(model, FILLER_SPEECH));
+            }, deps.fillerDelayMs ?? FILLER_DELAY_MS)
+          : undefined;
+
+      let spoken: string | null = null;
+      try {
+        if (!silent) {
+          await handleUtterance(
+            {
+              channel,
+              from: context.callerNumber ?? "unknown",
+              personId: context.personId,
+              text,
+              session,
+            },
+            utteranceDeps,
+          );
+          // A phone caller never gets dead air. Radio stays quiet on chatter.
+          if (said.length > 0) spoken = said.join(" ");
+          else if (channel === "voice") spoken = FALLBACK_SPEECH;
+        }
+      } finally {
+        clearTimeout(timer);
       }
 
-      res.set("content-type", "text/event-stream");
-      res.set("cache-control", "no-cache");
-      res.send(reply);
+      if (fillerSent) {
+        res.write(continuationStream(model, spoken ?? ""));
+        res.end();
+        return;
+      }
+      setHeaders();
+      res.send(spoken !== null ? speechStream(model, spoken) : quiet(silent ? "nothing said" : "radio chatter"));
     }),
   );
 
