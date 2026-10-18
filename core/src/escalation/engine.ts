@@ -207,7 +207,7 @@ export function createEscalationEngine(options: EscalationOptions): EscalationEn
           type: "place_call",
           person_id: person.person_id,
           to: person.handle,
-          script: replies.checkinCall(incident),
+          script: replies.checkinCall(incident, person.language),
           reason: "missed_checkin",
         });
       } else {
@@ -227,7 +227,7 @@ export function createEscalationEngine(options: EscalationOptions): EscalationEn
           type: "place_call",
           person_id: family.person_id,
           to: family.handle,
-          script: replies.familyCall(person.name, incident),
+          script: replies.familyCall(person.name, incident, family.language),
           reason: "escalation",
         });
       } else {

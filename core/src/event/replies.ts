@@ -167,7 +167,80 @@ export const TEMPLATES = {
     zh: "Relay 收到。暂时无法回答，请待命。",
     gu: "Relay ને સંદેશ મળ્યો. અત્યારે આનો જવાબ આપી શકાય તેમ નથી. રાહ જુઓ.",
   },
+  fireAlert: {
+    en: "Relay alert for the {incident}, {name}: {where}.{shelter} Reply SAFE if you are safe, or SOS if you need help.",
+    es: "Alerta de Relay por el {incident}, {name}: {where}.{shelter} Responda SAFE si está a salvo, o SOS si necesita ayuda.",
+    zh: "Relay 警报（{incident}），{name}：{where}。{shelter}安全请回复 SAFE，需要帮助请回复 SOS。",
+    gu: "{incident} માટે Relay એલર્ટ, {name}: {where}.{shelter} તમે સુરક્ષિત હો તો SAFE, અથવા મદદ જોઈએ તો SOS મોકલો.",
+  },
+  fireWhereOutside: {
+    en: "the fire is {km} km {direction} of you",
+    es: "el incendio está a {km} km al {direction} de usted",
+    zh: "火场在您的{direction}方向 {km} 公里处",
+    gu: "આગ તમારાથી {direction} દિશામાં {km} કિમી દૂર છે",
+  },
+  fireWhereInside: {
+    en: "you are inside the fire area",
+    es: "usted está dentro de la zona del incendio",
+    zh: "您位于火灾区域内",
+    gu: "તમે આગના વિસ્તારની અંદર છો",
+  },
+  fireShelterRoute: {
+    en: " Nearest shelter: {shelter}, {km} km, about {min} min by car.",
+    es: " Refugio más cercano: {shelter}, a {km} km, unos {min} min en coche.",
+    zh: "最近的避难所：{shelter}，距离 {km} 公里，开车约 {min} 分钟。",
+    gu: " સૌથી નજીકનું આશ્રયસ્થાન: {shelter}, {km} કિમી, કાર દ્વારા આશરે {min} મિનિટ.",
+  },
+  fireShelterNoRoute: {
+    en: " Nearest shelter: {shelter}, {km} km away.",
+    es: " Refugio más cercano: {shelter}, a {km} km.",
+    zh: "最近的避难所：{shelter}，距离 {km} 公里。",
+    gu: " સૌથી નજીકનું આશ્રયસ્થાન: {shelter}, {km} કિમી દૂર.",
+  },
+  checkinCall: {
+    en: "This is Relay, the service that just texted you about the {incident}. Are you safe right now? Say yes if you are safe, or help if you need help.",
+    es: "Le habla Relay, el servicio que acaba de enviarle un mensaje sobre el {incident}. ¿Está a salvo ahora mismo? Diga «sí» si está a salvo, o «ayuda» si necesita ayuda.",
+    zh: "这里是 Relay，刚才给您发短信通知{incident}的服务。您现在安全吗？如果安全，请说“是”；如果需要帮助，请说“救命”。",
+    gu: "આ Relay છે, જેણે હમણાં જ તમને {incident} વિશે મેસેજ કર્યો હતો. શું તમે અત્યારે સુરક્ષિત છો? સુરક્ષિત હો તો 'હા' બોલો, અથવા મદદ જોઈએ તો 'મદદ' બોલો.",
+  },
+  familyCall: {
+    en: "This is Relay, calling about the {incident}. We sent {name} a fire alert and called them, but could not reach them. If you can, please try to reach {name} and ask them to text Relay back. Responders are being told. Are you safe yourself? Say yes if you are safe, or help if you need help.",
+    es: "Le habla Relay, por el {incident}. Le enviamos a {name} una alerta de incendio y le llamamos, pero no logramos comunicarnos. Si puede, intente comunicarse con {name} y pídale que le responda a Relay por mensaje. Ya estamos avisando a los equipos de emergencia. ¿Usted está a salvo? Diga «sí» si está a salvo, o «ayuda» si necesita ayuda.",
+    zh: "这里是 Relay，来电是关于{incident}。我们给 {name} 发了火灾警报并打了电话，但联系不上。如果可以，请尝试联系 {name}，请对方回复 Relay 的短信。我们正在通知救援人员。您自己安全吗？如果安全，请说“是”；如果需要帮助，请说“救命”。",
+    gu: "આ Relay છે, {incident} વિશે ફોન કરી રહ્યા છીએ. અમે {name} ને આગનું એલર્ટ મોકલ્યું અને ફોન કર્યો, પણ સંપર્ક થઈ શક્યો નહીં. જો શક્ય હોય તો {name} નો સંપર્ક કરો અને તેમને Relay ને મેસેજથી જવાબ આપવા કહો. બચાવ ટીમને જાણ કરવામાં આવી રહી છે. શું તમે પોતે સુરક્ષિત છો? સુરક્ષિત હો તો 'હા' બોલો, અથવા મદદ જોઈએ તો 'મદદ' બોલો.",
+  },
 } as const satisfies Record<string, Translations>;
+
+/**
+ * Compass words for fire alerts, keyed by the English word that
+ * compassDirection returns.
+ */
+const DIRECTIONS = {
+  north: { en: "north", es: "norte", zh: "北", gu: "ઉત્તર" },
+  northeast: { en: "northeast", es: "noreste", zh: "东北", gu: "ઉત્તર-પૂર્વ" },
+  east: { en: "east", es: "este", zh: "东", gu: "પૂર્વ" },
+  southeast: { en: "southeast", es: "sureste", zh: "东南", gu: "દક્ષિણ-પૂર્વ" },
+  south: { en: "south", es: "sur", zh: "南", gu: "દક્ષિણ" },
+  southwest: { en: "southwest", es: "suroeste", zh: "西南", gu: "દક્ષિણ-પશ્ચિમ" },
+  west: { en: "west", es: "oeste", zh: "西", gu: "પશ્ચિમ" },
+  northwest: { en: "northwest", es: "noroeste", zh: "西北", gu: "ઉત્તર-પશ્ચિમ" },
+} as const satisfies Record<string, Translations>;
+
+/**
+ * Translate a compass word.
+ *
+ * Args:
+ *     word (string): English compass word, e.g. "northeast".
+ *     lang (string): A language code.
+ *
+ * Returns:
+ *     string: The word in that language, or the English word if it is not
+ *         one of the eight compass points.
+ */
+function direction(word: string, lang: string): string {
+  const entry = (DIRECTIONS as Record<string, Translations>)[word];
+  return entry ? entry[resolveLang(lang)] : word;
+}
 
 /** The id of a fixed reply template. */
 export type TemplateId = keyof typeof TEMPLATES;
@@ -381,26 +454,33 @@ export const replies = {
   /**
    * Fire alert text the hazard watcher sends to someone near a fire.
    *
+   * It is a safety alert, so like familySos it is sent in the person's
+   * language followed by the English, in case someone else reads it.
+   *
    * Args:
    *     alert (FireAlert): Who, how far, which way, and the nearest shelter.
+   *     lang (string): Their language. Defaults to English.
    *
    * Returns:
    *     string: The alert text.
    */
-  fireAlert(alert: FireAlert): string {
-    const where = alert.inside
-      ? "you are inside the fire area"
-      : `the fire is ${km(alert.fireKm)} km ${alert.direction} of you`;
-    let shelter = "";
-    if (alert.shelter) {
-      const s = alert.shelter;
-      const trip = s.minutes === null ? `${km(s.km)} km away` : `${km(s.km)} km, about ${minutes(s.minutes)} min by car`;
-      shelter = ` Nearest shelter: ${s.name}, ${trip}.`;
-    }
-    return (
-      `Relay alert for the ${alert.incident}, ${alert.name}: ${where}.${shelter}` +
-      " Reply SAFE if you are safe, or SOS if you need help."
-    );
+  fireAlert(alert: FireAlert, lang = "en"): string {
+    const one = (l: string): string => {
+      const where = alert.inside
+        ? render("fireWhereInside", l, {})
+        : render("fireWhereOutside", l, { km: km(alert.fireKm), direction: direction(alert.direction, l) });
+      let shelter = "";
+      if (alert.shelter) {
+        const s = alert.shelter;
+        shelter =
+          s.minutes === null
+            ? render("fireShelterNoRoute", l, { shelter: s.name, km: km(s.km) })
+            : render("fireShelterRoute", l, { shelter: s.name, km: km(s.km), min: minutes(s.minutes) });
+      }
+      return render("fireAlert", l, { incident: alert.incident, name: alert.name, where, shelter });
+    };
+    const english = one("en");
+    return resolveLang(lang) === "en" ? english : `${one(lang)}\n\n${english}`;
   },
 
   /**
@@ -411,15 +491,13 @@ export const replies = {
    *
    * Args:
    *     incident (string): Incident name.
+   *     lang (string): Their language. Defaults to English.
    *
    * Returns:
    *     string: The spoken script.
    */
-  checkinCall(incident: string): string {
-    return (
-      `This is Relay, the service that just texted you about the ${incident}. ` +
-      "Are you safe right now? Say yes if you are safe, or help if you need help."
-    );
+  checkinCall(incident: string, lang = "en"): string {
+    return render("checkinCall", lang, { incident });
   },
 
   /**
@@ -431,16 +509,13 @@ export const replies = {
    * Args:
    *     name (string): The person Relay cannot reach.
    *     incident (string): Incident name.
+   *     lang (string): The family contact's language. Defaults to English.
    *
    * Returns:
    *     string: The spoken script.
    */
-  familyCall(name: string, incident: string): string {
-    return (
-      `This is Relay, calling about the ${incident}. We sent ${name} a fire alert and called them, but could not reach them. ` +
-      `If you can, please try to reach ${name} and ask them to text Relay back. Responders are being told. ` +
-      "Are you safe yourself? Say yes if you are safe, or help if you need help."
-    );
+  familyCall(name: string, incident: string, lang = "en"): string {
+    return render("familyCall", lang, { name, incident });
   },
 
   /**

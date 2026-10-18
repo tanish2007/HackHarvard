@@ -215,7 +215,7 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
       type: "send_text",
       person_id: person.person_id,
       to: person.handle,
-      text: replies.fireAlert(alert),
+      text: replies.fireAlert(alert, person.language),
       map_url: null,
     };
     return { action, alert };
