@@ -169,7 +169,7 @@ export const TOOLS: Tool[] = [
     declaration: {
       name: "plan_route",
       description:
-        "A driving route that avoids fire areas, with distance, minutes, and steps. Use for any 'route to', 'how do I get to', or 'fastest way to' question, including 'nearest shelter'.",
+        "A route that avoids fire areas, with distance, minutes, and steps. For a resident this is a walking path from their current location to the place they named. Use for any 'route to', 'how do I get to', 'take me to', 'where should I go', or 'nearest shelter' question.",
       parameters: {
         type: "object",
         properties: {
@@ -186,7 +186,7 @@ export const TOOLS: Tool[] = [
       if (!destination) throw new Error("destination is required, e.g. a shelter name or 'nearest shelter'.");
       const from = placeOrThrow(str(args, "origin"), ctx);
       const to = placeOrThrow(destination, { ...ctx, origin: from });
-      const route = await ctx.data.getRoute(from.lat, from.lng, to.lat, to.lng);
+      const route = await ctx.data.getRoute(from.lat, from.lng, to.lat, to.lng, ctx.isResponder ? "driving" : "foot");
       return {
         from: from.name,
         to: to.name,

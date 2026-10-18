@@ -8,9 +8,9 @@ It is not part of Contract D. GET /firms is the live NASA panel. It is
 not the staged fire, and it is not Contract C.
 
 Contract C is also on this server. /weather and /route with no query
-stay the map's existing calls. The no-query route starts at that
-person's live position from Core when Core has one. lat/lng query
-params call the functions directly.
+stay the map's existing calls. The no-query route is empty until
+someone texts help, and then it is an OpenStreetMap walking path.
+lat/lng query params call the functions directly.
 
     python dashboard/server.py
 """
@@ -52,11 +52,11 @@ if str(ROOT) not in sys.path:
 from data.api import get_hazards, get_route, get_shelters, get_weather  # noqa: E402
 from data.errors import DataSourceError  # noqa: E402
 from data.firms import fetch_fire_hazards  # noqa: E402
+from data.routing import fetch_route  # noqa: E402
 from data.scenario import load_scenario  # noqa: E402
-from data.state import build_route, build_state, build_weather  # noqa: E402
+from data.state import build_state, build_weather  # noqa: E402
 
 _picture_cache = {"at": 0.0, "body": b""}
-_scenario_route_cache = {"payload": None}
 _live_route_cache = {"key": None, "payload": None}
 
 
@@ -106,65 +106,141 @@ def state_bytes():
     return body
 
 
-def _scenario_route():
-    """Return the scenario route, built once per process.
-
-    Returns:
-        dict: Route fields plus person_name and shelter_name.
-    """
-    if _scenario_route_cache["payload"] is None:
-        _scenario_route_cache["payload"] = build_route()
-    return _scenario_route_cache["payload"]
-
-
-def _live_origin(name):
-    """Read one person's current latitude and longitude from Core.
+def _texted_help(text):
+    """Whether a text is the help message that should draw a route.
 
     Args:
-        name (str): Person name on the route, matched to Core's people list.
+        text (str): The inbound message.
 
     Returns:
-        tuple[float, float] | None: Live coordinates, or None when Core
-        has no such fix.
+        bool: True for help or SOS, after trimming and lowercasing.
+    """
+    body = " ".join(str(text or "").split()).lower()
+    return body in {"help", "help me", "i need help", "need help", "sos"}
+
+
+def _empty_route():
+    """Return a route body with no line, so the map clears the path.
+
+    Returns:
+        dict: Route fields with an empty polyline.
+    """
+    return {
+        "distance_km": 0.0,
+        "duration_min": 0.0,
+        "steps": [],
+        "polyline": [],
+        "avoided_hazards": [],
+        "source": "fallback",
+        "person_name": "",
+        "shelter_name": "",
+    }
+
+
+def _help_texter():
+    """Find who texted help and is still marked as needing it.
+
+    A phone call does not count. The person has to have sent the word
+    over iMessage or SMS, and still be in SOS.
+
+    Returns:
+        tuple[str, float, float] | None: Name and live coordinates, or
+        None when nobody has texted help.
     """
     try:
         payload = json.loads(fetch_core_state())
     except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError):
         return None
+    by_name = {}
     for person in payload.get("people") or []:
-        if person.get("name") != name:
+        if person.get("status") != "sos" or str(person.get("person_id") or "").startswith("sim_"):
+            continue
+        name = person.get("name") or ""
+        try:
+            by_name[name] = (name, float(person["lat"]), float(person["lng"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    best = None
+    best_at = ""
+    for entry in payload.get("timeline") or []:
+        if entry.get("channel") not in ("imessage", "sms"):
+            continue
+        name = entry.get("who") or ""
+        if name not in by_name or not _texted_help(entry.get("text")):
+            continue
+        at = entry.get("at") or ""
+        if best is None or at >= best_at:
+            best = by_name[name]
+            best_at = at
+    return best
+
+
+def _drawn_fires():
+    """Return fire circles the map is currently drawing.
+
+    The scenario placeholder is hidden on the map, so it does not bend
+    the walking path. A fire that has been turned on does.
+
+    Returns:
+        list[dict]: Fire hazards with lat, lng, and radius_km.
+    """
+    try:
+        payload = json.loads(fetch_core_state())
+    except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError):
+        return []
+    fires = []
+    for hazard in payload.get("hazards") or []:
+        if hazard.get("kind") != "fire" or hazard.get("source") == "scenario":
             continue
         try:
-            return float(person["lat"]), float(person["lng"])
+            fires.append({
+                "id": hazard.get("id") or "fire",
+                "lat": float(hazard["lat"]),
+                "lng": float(hazard["lng"]),
+                "radius_km": float(hazard["radius_km"]),
+            })
         except (KeyError, TypeError, ValueError):
-            return None
-    return None
+            continue
+    return fires
 
 
 def map_route():
-    """Return the demo route, starting at Core's live position when it has one.
+    """Return a walking route only after someone texts help.
 
-    The shelter stays the one nearest the scenario home. A failed Core
-    read keeps the scenario start. Repeated polls reuse the line until
-    the live position changes.
+    Until that text, the polyline is empty and the map draws no path.
+    The line is an OpenStreetMap foot path from where they are to the
+    nearest shelter. It is not the straight demo line. Repeated polls
+    reuse it until they move or someone else texts help.
 
     Returns:
         dict: Route fields plus person_name and shelter_name.
     """
-    base = _scenario_route()
-    live = _live_origin(base.get("person_name"))
-    if live is None:
-        waiting = dict(base)
-        waiting["polyline"] = []
-        waiting["steps"] = []
-        waiting["distance_km"] = 0.0
-        waiting["duration_min"] = 0.0
-        waiting["avoided_hazards"] = []
-        return waiting
-    key = (base.get("person_name"), round(live[0], 4), round(live[1], 4))
+    texter = _help_texter()
+    if texter is None:
+        return _empty_route()
+    name, lat, lng = texter
+    key = ("help", name, round(lat, 4), round(lng, 4))
     if _live_route_cache["key"] == key and _live_route_cache["payload"] is not None:
         return _live_route_cache["payload"]
-    routed = build_route(start_lat=live[0], start_lng=live[1])
+    shelters = get_shelters(lat, lng)
+    if not shelters:
+        return _empty_route()
+    shelter = shelters[0]
+    try:
+        routed = fetch_route(
+            lat,
+            lng,
+            shelter["lat"],
+            shelter["lng"],
+            _drawn_fires(),
+            shelter["name"],
+            profile="foot",
+            allow_geometric=False,
+        )
+    except DataSourceError:
+        return _empty_route()
+    routed["person_name"] = name
+    routed["shelter_name"] = shelter["name"]
     _live_route_cache["key"] = key
     _live_route_cache["payload"] = routed
     return routed
@@ -267,7 +343,7 @@ def firms_hazards(lat, lng, radius_km):
 
 
 def picture_bytes():
-    """Serialize zones, wind, phones, the venue, and unit stations.
+    """Serialize zones, wind, phones, the venue, unit stations, and call timers.
 
     Phones come from scenario.json, replaced by scenario.local.json when
     that file has a number. They are not added to /state.
@@ -315,6 +391,8 @@ def picture_bytes():
             "source": weather["source"],
         },
         "phones": _picture_phones(scenario),
+        "checkin_timeout_sec": scenario["settings"]["checkin_timeout_sec"],
+        "escalation_timeout_sec": scenario["settings"]["escalation_timeout_sec"],
     }
     body = json.dumps(payload).encode("utf-8")
     _picture_cache["at"] = now
@@ -365,11 +443,13 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/route":
             if any(key in qs for key in ("from_lat", "from_lng", "to_lat", "to_lng")):
+                profile = (qs.get("profile") or ["driving"])[0]
                 self._contract(lambda: get_route(
                     _query_float(qs, "from_lat"),
                     _query_float(qs, "from_lng"),
                     _query_float(qs, "to_lat"),
                     _query_float(qs, "to_lng"),
+                    profile="foot" if profile == "foot" else "driving",
                 ))
             else:
                 self._contract(map_route)

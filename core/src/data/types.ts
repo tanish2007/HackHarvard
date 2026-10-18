@@ -49,7 +49,7 @@ export interface DataWeather {
  */
 export interface DataTools {
   getHazards(lat: number, lng: number, radiusKm: number): Promise<DataHazard[]>;
-  getRoute(fromLat: number, fromLng: number, toLat: number, toLng: number): Promise<DataRoute>;
+  getRoute(fromLat: number, fromLng: number, toLat: number, toLng: number, profile?: "driving" | "foot"): Promise<DataRoute>;
   getShelters(lat: number, lng: number): Promise<DataShelter[]>;
   getWeather(lat: number, lng: number): Promise<DataWeather>;
 }

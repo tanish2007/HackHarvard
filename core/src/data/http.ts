@@ -108,7 +108,7 @@ export function createHttpData(options: HttpDataOptions): DataTools {
    */
   async function ask<T>(
     path: string,
-    params: Record<string, number>,
+    params: Record<string, number | string>,
     valid: (v: unknown) => v is T,
     fallback: () => Promise<T>,
   ): Promise<T> {
@@ -130,10 +130,16 @@ export function createHttpData(options: HttpDataOptions): DataTools {
   return {
     getHazards: (lat, lng, radiusKm) =>
       ask("/hazards", { lat, lng, radius_km: radiusKm }, isHazardList, () => options.fallback.getHazards(lat, lng, radiusKm)),
-    getRoute: (fromLat, fromLng, toLat, toLng) =>
+    getRoute: (fromLat, fromLng, toLat, toLng, profile) =>
       ask(
         "/route",
-        { from_lat: fromLat, from_lng: fromLng, to_lat: toLat, to_lng: toLng },
+        {
+          from_lat: fromLat,
+          from_lng: fromLng,
+          to_lat: toLat,
+          to_lng: toLng,
+          ...(profile === "foot" ? { profile } : {}),
+        },
         isRoute,
         () => options.fallback.getRoute(fromLat, fromLng, toLat, toLng),
       ),

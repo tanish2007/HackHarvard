@@ -29,16 +29,30 @@ type Xy = [number, number];
  *     DataTools: The four Contract C functions, answered from the scenario.
  */
 export function createStubData(scenario: Scenario): DataTools {
-  const fire = (): DataHazard => ({
-    id: "hz_scenario_fire",
-    kind: "fire",
-    lat: scenario.fire_area.lat,
-    lng: scenario.fire_area.lng,
-    radius_km: scenario.fire_area.radius_km,
-    severity: "high",
-    source: "fake",
-    updated_at: "",
-  });
+  const fires = (): DataHazard[] => [
+    {
+      id: "hz_scenario_fire",
+      kind: "fire",
+      lat: scenario.fire_area.lat,
+      lng: scenario.fire_area.lng,
+      radius_km: scenario.fire_area.radius_km,
+      severity: "high",
+      source: "fake",
+      updated_at: "",
+    },
+    ...scenario.extra_fires.map(
+      (fire): DataHazard => ({
+        id: fire.id,
+        kind: "fire",
+        lat: fire.lat,
+        lng: fire.lng,
+        radius_km: fire.radius_km,
+        severity: "high",
+        source: "fake",
+        updated_at: "",
+      }),
+    ),
+  ];
 
   // Name the route's end after the closest named spot, place or shelter.
   // Using shelters only (as data/api.py does) made a route to Oak St say
@@ -54,8 +68,7 @@ export function createStubData(scenario: Scenario): DataTools {
 
   return {
     async getHazards(lat, lng, radiusKm) {
-      const f = fire();
-      return distanceKm(lat, lng, f.lat, f.lng) > radiusKm + f.radius_km ? [] : [f];
+      return fires().filter((fire) => distanceKm(lat, lng, fire.lat, fire.lng) <= radiusKm + fire.radius_km);
     },
 
     async getShelters(lat, lng) {
@@ -78,10 +91,10 @@ export function createStubData(scenario: Scenario): DataTools {
       return { ...scenario.fake_weather, source: "fake" };
     },
 
-    async getRoute(fromLat, fromLng, toLat, toLng): Promise<DataRoute> {
+    async getRoute(fromLat, fromLng, toLat, toLng, _profile?: "driving" | "foot"): Promise<DataRoute> {
       const start = { lat: fromLat, lng: fromLng };
       const end = { lat: toLat, lng: toLng };
-      const f = fire();
+      const f = fires()[0];
       const waypoint = detourAround(start, end, f);
       const polyline = waypoint ? [start, waypoint, end] : [start, end];
 
