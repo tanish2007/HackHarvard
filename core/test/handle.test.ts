@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RelayAction, RelayEvent } from "../src/contracts.js";
 import { AGENT_TIMEOUT_MS, handleEvent, type Agent, type AgentContext } from "../src/event/handle.js";
 import type { IncidentStore } from "../src/state/store.js";
-import { makeEvent, makeStore, PHONES } from "./helpers.js";
+import { makeEvent, makeStore, PHONES, recordingDispatcher } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -133,20 +133,15 @@ describe("finding the sender", () => {
 });
 
 describe("sign-up", () => {
-  it("adds an unknown texter and welcomes them, asking for a location", async () => {
+  it("adds an unknown texter and answers them, without a second welcome", async () => {
+    // Text owns sign-up and already welcomed them before forwarding anything.
     const { store } = makeStore();
     const actions = await send(store, { from: PHONES.stranger, text: "hi" });
     expect(store.getPerson("p_new_1")).toMatchObject({ handle: PHONES.stranger, status: "unconfirmed" });
     expect(actions).toEqual([
-      {
-        type: "send_text",
-        person_id: "p_new_1",
-        to: PHONES.stranger,
-        text: expect.stringContaining("Please share your location"),
-        map_url: null,
-      },
+      { type: "send_text", person_id: "p_new_1", to: PHONES.stranger, text: expect.stringContaining(INCIDENT), map_url: null },
     ]);
-    expect(actions[0].type === "send_text" && actions[0].text).toContain(INCIDENT);
+    expect(actions[0].type === "send_text" && actions[0].text).not.toMatch(/Welcome/);
     expect(rows(store).slice(0, 2)).toEqual([
       ["imessage", "New resident 1", "hi"],
       ["system", "Relay", "New resident 1 signed up by text"],
@@ -166,12 +161,12 @@ describe("sign-up", () => {
     expect(store.getPerson("p_new_1")).toBeDefined();
   });
 
-  it("welcomes instead of calling the agent on the first message", async () => {
+  it("sends a new texter's first question to the agent", async () => {
     const { store } = makeStore();
     const { agent, calls } = recordingAgent();
-    const [action] = await send(store, { from: PHONES.stranger, text: "where is the nearest shelter?" }, agent);
-    expect(calls).toHaveLength(0);
-    expect(action.type === "send_text" && action.text).toMatch(/^Welcome to Relay/);
+    const actions = await send(store, { from: PHONES.stranger, text: "where is the nearest shelter?" }, agent);
+    expect(calls).toHaveLength(1);
+    expect(actions).toEqual([{ type: "say", text: "agent answer" }]);
   });
 
   it("knows them on the second message", async () => {
@@ -248,6 +243,21 @@ describe("SOS", () => {
       ["imessage", "Relay", expect.stringMatching(/^To Amit: /)],
       ["imessage", "Relay", expect.stringMatching(/^To Priya: /)],
     ]);
+  });
+
+  it("pushes the family text to its lane and replies only to the sender", async () => {
+    // Channels only answer the person they are talking to, so a family text
+    // left in the reply would be dropped.
+    const { store } = makeStore();
+    const { dispatcher, pushed } = recordingDispatcher();
+    const event = makeEvent({ text: "SOS" });
+    const { actions } = await handleEvent(event, { store, dispatcher });
+    expect(actions).toEqual([expect.objectContaining({ type: "send_text", person_id: "p_amit" })]);
+    expect(pushed).toEqual([expect.objectContaining({ type: "send_text", person_id: "p_priya", to: PHONES.priya })]);
+
+    // A redelivered event gets the same reply and does not push again.
+    expect((await handleEvent(event, { store, dispatcher })).actions).toEqual(actions);
+    expect(pushed).toHaveLength(1);
   });
 
   it("puts the person first on /state with an sos count", async () => {
@@ -380,18 +390,15 @@ describe("safe and leaving", () => {
 });
 
 describe("STOP", () => {
-  it("removes the person and texts a confirmation to their handle", async () => {
+  it("removes the person without replying, since Text confirms STOP", async () => {
     const { store } = makeStore();
     const actions = await send(store, { text: "Stop." });
     expect(store.getPerson("p_amit")).toBeUndefined();
     expect(store.snapshot().people.some((p) => p.person_id === "p_amit")).toBe(false);
-    expect(actions).toEqual([
-      { type: "send_text", person_id: "p_amit", to: PHONES.amit, text: expect.stringContaining("unsubscribed"), map_url: null },
-    ]);
+    expect(actions).toEqual([]);
     expect(rows(store)).toEqual([
       ["imessage", "Amit", "Stop."],
       ["system", "Relay", "Amit opted out (STOP)"],
-      ["imessage", "Relay", expect.stringMatching(/^To Amit: You're unsubscribed/)],
     ]);
   });
 
@@ -410,9 +417,8 @@ describe("STOP", () => {
     const { store } = makeStore();
     await send(store, { text: "STOP" });
     const actions = await send(store, { text: "hi again" });
-    expect(actions).toEqual([
-      { type: "send_text", person_id: "p_amit", to: PHONES.amit, text: expect.stringMatching(/^Welcome back, Amit\./), map_url: null },
-    ]);
+    expect(actions).toEqual([{ type: "send_text", person_id: "p_amit", to: PHONES.amit, text: expect.any(String), map_url: null }]);
+    expect(actions[0].type === "send_text" && actions[0].text).not.toMatch(/Welcome back/);
     expect(store.getPerson("p_amit")).toMatchObject({ name: "Amit", family_contact: "p_priya", household_id: "h_patel", status: "unconfirmed" });
     expect(store.getPerson("p_new_1")).toBeUndefined();
     expect(rows(store)).toContainEqual(["system", "Relay", "Amit signed up again after STOP"]);
