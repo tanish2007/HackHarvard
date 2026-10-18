@@ -9,6 +9,7 @@
  */
 import type {
   CoreResponse,
+  FireSpread,
   Hazard,
   Shelter,
   StateCounts,
@@ -124,6 +125,8 @@ export class IncidentStore {
   private optedOut = new Map<string, TrackedPerson>();
   private sosAt = new Map<string, string>();
   private lastText = new Map<string, string>();
+  /** hazard id to its projected spread, from core/src/fire/. */
+  private spreads = new Map<string, FireSpread>();
   private offers = new Map<string, VolunteerOffer>();
   private newPeopleCount = 0;
   private updatedAt = "";
@@ -194,6 +197,7 @@ export class IncidentStore {
     this.optedOut = new Map();
     this.sosAt = new Map(this.scenario.people.filter((p) => p.initial_status === "sos").map((p) => [p.person_id, at]));
     this.lastText = new Map();
+    this.spreads = new Map();
     this.offers = new Map();
     this.newPeopleCount = 0;
     this.updatedAt = at;
@@ -525,7 +529,42 @@ export class IncidentStore {
       source: h.source,
       updated_at: h.updated_at || at,
     }));
+    // A forecast only stays while its fire is still on the map.
+    const ids = new Set(this.hazards.map((h) => h.id));
+    for (const id of this.spreads.keys()) if (!ids.has(id)) this.spreads.delete(id);
     this.touch();
+  }
+
+  /**
+   * Attach a projected spread to a fire on the map.
+   *
+   * Args:
+   *     hazardId (string): The fire's id.
+   *     spread (FireSpread | null): The forecast, or null to remove it.
+   *
+   * Returns:
+   *     boolean: False if no hazard has that id.
+   */
+  setFireSpread(hazardId: string, spread: FireSpread | null): boolean {
+    if (!this.hazards.some((h) => h.id === hazardId)) return false;
+    if (spread) this.spreads.set(hazardId, structuredClone(spread));
+    else this.spreads.delete(hazardId);
+    this.touch();
+    return true;
+  }
+
+  /**
+   * The projected spread of a fire, if one was computed.
+   *
+   * Args:
+   *     hazardId (string): The fire's id.
+   *
+   * Returns:
+   *     FireSpread | undefined: A copy.
+   */
+  getFireSpread(hazardId: string): FireSpread | undefined {
+    const s = this.spreads.get(hazardId);
+    return s ? structuredClone(s) : undefined;
   }
 
   /**
@@ -645,7 +684,10 @@ export class IncidentStore {
 
     return {
       incident: { name: this.scenario.incident.name, updated_at: this.updatedAt },
-      hazards: this.hazards.map((h) => ({ ...h })),
+      hazards: this.hazards.map((h) => {
+        const spread = this.spreads.get(h.id);
+        return spread ? { ...h, spread: structuredClone(spread) } : { ...h };
+      }),
       shelters: this.shelters(),
       people: residents,
       volunteers,
