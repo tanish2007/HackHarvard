@@ -15,16 +15,16 @@ Core -> POST /actions (this server) -> ElevenLabs outbound call -> phone
 3. Start Core from the repo root (`npm start`), then Voice (`cd voice && npm start`, port 3001).
 4. Put `VOICE_ACTIONS_URL=http://localhost:3001/actions` in the root `.env` so Core can push calls here.
 5. Expose port 3001 with a tunnel, for example `cloudflared tunnel --url http://localhost:3001`. The address changes each restart.
-6. Place a test call: `RING_PERSON_ID=p_amit npm run ring` (rings `TEST_CALL_TO`).
+6. Place a test call: `RING_PERSON_ID=p_amit npm run ring` (rings `TEST_CALL_TO`). Set `RING_SCRIPT` to change the opening line.
 
 ## ElevenLabs agent settings that must be right
 
 - **LLM:** Custom LLM. Server URL is `https://<tunnel>/llm/<VOICE_LLM_SECRET>/v1`. ElevenLabs adds `/chat/completions` itself, so the `/v1` must be in the URL. Model ID is `relay`. Leave the API key as None, the secret in the URL is the protection.
-- **Overrides:** turn on **First message** under the agent's Security or Settings. Without it every call is dropped after one second with "Override for field 'first_message' is not allowed by config".
+- **Overrides:** turn on **First message** and **Language** under the agent's Security or Settings. Without First message every call is dropped after one second with "Override for field 'first_message' is not allowed by config". Language is needed so a call can run in the person's language.
 - **System prompt:** the first line must be `RELAY_CALL person_id={{person_id}} caller_number={{caller_number}}`. The server reads who the call is about from it.
 - **Backup LLMs:** set to Disabled while testing. Otherwise a failure silently falls back to a generic model that never talks to Core.
 - **Radio agent (separate agent):** Model ID `relay-radio`, and the `skip_turn` system tool enabled. When Core returns nothing, the server asks the agent to skip its turn so Relay stays quiet.
-- **Languages:** add the languages you want and use a multilingual voice. Core supports en, es, zh and gu.
+- **Languages:** Core supports en, es, zh, gu and hi. Add each language you want to the agent and use a multilingual voice. `ELEVENLABS_LANGUAGES` (default `es,gu,hi`) lists the ones the agent has, and a call to a person in one of them runs in their language, read from Core's `GET /state`. English and anything not listed use the agent's default. Gujarati works but sounds less natural than Hindi or Spanish.
 
 ## Photon and ElevenLabs trunk
 
