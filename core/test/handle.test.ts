@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RelayAction, RelayEvent } from "../src/contracts.js";
-import { AGENT_TIMEOUT_MS, handleEvent, type Agent, type AgentContext } from "../src/event/handle.js";
+import { AGENT_TIMEOUT_MS, agentTimeoutMs, handleEvent, type Agent, type AgentContext } from "../src/event/handle.js";
 import type { IncidentStore } from "../src/state/store.js";
 import { makeEvent, makeStore, PHONES, recordingDispatcher } from "./helpers.js";
 
@@ -621,6 +621,29 @@ describe("agent time limit", () => {
 
   it("is 3.2 seconds, under Voice's 4 second limit", () => {
     expect(AGENT_TIMEOUT_MS).toBe(3200);
+  });
+
+  it("lets AGENT_TIMEOUT_MS in the environment raise the wait, read at call time, and ignores bad values", () => {
+    vi.stubEnv("AGENT_TIMEOUT_MS", "9000");
+    expect(agentTimeoutMs()).toBe(9000);
+    for (const bad of ["soon", "", "0", "-5"]) {
+      vi.stubEnv("AGENT_TIMEOUT_MS", bad);
+      expect(agentTimeoutMs()).toBe(3200);
+    }
+    vi.unstubAllEnvs();
+    expect(agentTimeoutMs()).toBe(3200);
+  });
+
+  it("waits for the longer limit when AGENT_TIMEOUT_MS is set", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AGENT_TIMEOUT_MS", "9000");
+    const { store } = makeStore();
+    const agent: Agent = () =>
+      new Promise((resolve) => setTimeout(() => resolve([{ type: "say", text: "slow but here" }]), 7000));
+    const pending = handleEvent(makeEvent({ channel: "voice", text: "where is the shelter" }), { store, agent });
+    await vi.advanceTimersByTimeAsync(7000);
+    expect((await pending).actions).toEqual([{ type: "say", text: "slow but here" }]);
+    vi.unstubAllEnvs();
   });
 
   it("aborts the agent and replies with the fallback once the limit passes", async () => {

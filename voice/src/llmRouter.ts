@@ -12,13 +12,26 @@
 import { timingSafeEqual } from "node:crypto";
 import express, { Router } from "express";
 import { asyncHandler } from "./asyncHandler.js";
-import { lastUserText, parseCallContext, type ChatMessage } from "./llmRequest.js";
+import { lastUserText, parseCallContext, type CallContext, type ChatMessage } from "./llmRequest.js";
 import type { CallPlacer, CallSession } from "./ports.js";
-import { silenceStream, speechStream } from "./sse.js";
+import { continuationStream, openingChunk, silenceStream, speechStream } from "./sse.js";
 import { handleUtterance, type UtteranceDeps } from "./utterance.js";
 
 /** What a voice caller hears if Core cannot be reached. */
 export const FALLBACK_SPEECH = "Sorry, I lost my connection for a moment. Please say that again.";
+
+/** What a phone caller hears while Core is still thinking. The trailing space matters to the voice. */
+export const FILLER_SPEECH = "One moment... ";
+
+/** How long Core can take before the caller hears the filler, in milliseconds. */
+export const FILLER_DELAY_MS = 1500;
+
+/**
+ * How long a finished answer is kept for a repeat of the same request, in
+ * milliseconds. ElevenLabs can send the same request more than once, for
+ * example when the first seems slow.
+ */
+export const DUPLICATE_WINDOW_MS = 5000;
 
 /** Model name that marks the always-open radio call. Anything else is a phone call. */
 export const RADIO_MODEL = "relay-radio";
@@ -33,6 +46,12 @@ export interface LlmRouterDeps {
   placer: CallPlacer;
   /** Fetch implementation for Core, injectable for tests. */
   fetchImpl?: typeof fetch;
+  /** How long to wait for Core before a phone caller hears the filler. Defaults to FILLER_DELAY_MS. */
+  fillerDelayMs?: number;
+  /** How long to wait for Core's answer in total. Defaults to the Core client's own default. */
+  coreTimeoutMs?: number;
+  /** How long a repeat of the same request shares the first answer. Defaults to DUPLICATE_WINDOW_MS. */
+  duplicateWindowMs?: number;
   /** Logger. Defaults to console.warn. */
   log?: (msg: string) => void;
 }
@@ -54,6 +73,39 @@ function sameSecret(a: string, b: string): boolean {
 }
 
 /**
+ * Ask Core what to say to one utterance.
+ *
+ * Args:
+ *   channel: `voice` for a phone call, `radio` for the radio call.
+ *   context: Who the call is about.
+ *   text: What the caller said.
+ *   deps: Core's URL, the call placer and the logger.
+ *
+ * Returns:
+ *   What to speak, or null if Relay should stay silent. A phone caller never
+ *   gets null: they hear the fallback line instead.
+ */
+async function answer(
+  channel: "voice" | "radio",
+  context: CallContext,
+  text: string,
+  deps: UtteranceDeps,
+): Promise<string | null> {
+  const said: string[] = [];
+  const session: CallSession = {
+    async speak(line) {
+      said.push(line);
+    },
+  };
+  await handleUtterance(
+    { channel, from: context.callerNumber ?? "unknown", personId: context.personId, text, session },
+    deps,
+  );
+  if (said.length > 0) return said.join(" ");
+  return channel === "voice" ? FALLBACK_SPEECH : null;
+}
+
+/**
  * Build the router that serves the custom LLM endpoint.
  *
  * Args:
@@ -65,6 +117,9 @@ function sameSecret(a: string, b: string): boolean {
 export function createLlmRouter(deps: LlmRouterDeps): Router {
   const router = Router();
   const log = deps.log ?? ((m: string) => console.warn(m));
+  // Requests being answered, so a repeat of the same one shares the answer
+  // instead of sending Core (and the model behind it) the same question again.
+  const inFlight = new Map<string, Promise<string | null>>();
 
   router.post(
     "/llm/:secret/v1/chat/completions",
@@ -87,48 +142,67 @@ export function createLlmRouter(deps: LlmRouterDeps): Router {
       const quiet = (reason: string): string =>
         canSkip ? silenceStream(model, reason) : speechStream(model, "");
 
-      const said: string[] = [];
-      const session: CallSession = {
-        async speak(text) {
-          said.push(text);
-        },
-      };
-
       const context = parseCallContext(messages);
       const utteranceDeps: UtteranceDeps = {
         coreUrl: deps.coreUrl,
         placer: deps.placer,
         resolvePerson: () => null,
         fetchImpl: deps.fetchImpl,
+        coreTimeoutMs: deps.coreTimeoutMs,
         log,
       };
 
-      let reply: string;
       const text = lastUserText(messages);
       // ElevenLabs sends "..." while the caller is silent. That is not speech,
       // so it must not reach Core or get an answer.
-      if (!/[\p{L}\p{N}]/u.test(text)) {
-        reply = quiet("nothing said");
-      } else {
-        await handleUtterance(
-          {
-            channel,
-            from: context.callerNumber ?? "unknown",
-            personId: context.personId,
-            text,
-            session,
-          },
-          utteranceDeps,
-        );
-        if (said.length > 0) reply = speechStream(model, said.join(" "));
-        // A phone caller never gets dead air. Radio stays quiet on chatter.
-        else if (channel === "voice") reply = speechStream(model, FALLBACK_SPEECH);
-        else reply = quiet("radio chatter");
+      const silent = !/[\p{L}\p{N}]/u.test(text);
+
+      // A phone caller hears a filler if Core is slow. Radio never does, since
+      // Relay must stay quiet there unless it was addressed.
+      let fillerSent = false;
+      const setHeaders = (): void => {
+        res.status(200);
+        res.set("content-type", "text/event-stream");
+        res.set("cache-control", "no-cache");
+      };
+      const timer =
+        channel === "voice" && !silent
+          ? setTimeout(() => {
+              fillerSent = true;
+              setHeaders();
+              res.flushHeaders();
+              res.write(openingChunk(model, FILLER_SPEECH));
+            }, deps.fillerDelayMs ?? FILLER_DELAY_MS)
+          : undefined;
+
+      let spoken: string | null = null;
+      try {
+        if (!silent) {
+          const key = `${channel}|${context.callerNumber ?? ""}|${context.personId ?? ""}|${text}`;
+          let work = inFlight.get(key);
+          if (work) {
+            log(`duplicate ${channel} request shared with the one in progress`);
+          } else {
+            work = answer(channel, context, text, utteranceDeps);
+            inFlight.set(key, work);
+            const forget = (): void => {
+              setTimeout(() => inFlight.delete(key), deps.duplicateWindowMs ?? DUPLICATE_WINDOW_MS).unref();
+            };
+            work.then(forget, forget);
+          }
+          spoken = await work;
+        }
+      } finally {
+        clearTimeout(timer);
       }
 
-      res.set("content-type", "text/event-stream");
-      res.set("cache-control", "no-cache");
-      res.send(reply);
+      if (fillerSent) {
+        res.write(continuationStream(model, spoken ?? ""));
+        res.end();
+        return;
+      }
+      setHeaders();
+      res.send(spoken !== null ? speechStream(model, spoken) : quiet(silent ? "nothing said" : "radio chatter"));
     }),
   );
 

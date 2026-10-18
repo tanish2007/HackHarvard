@@ -28,6 +28,8 @@ export interface UtteranceDeps {
   now?: () => Date;
   /** Fetch implementation, injectable for tests. */
   fetchImpl?: typeof fetch;
+  /** How long to wait for Core in milliseconds. Defaults to the Core client's default. */
+  coreTimeoutMs?: number;
   /** Logger. Defaults to console.warn. */
   log?: (msg: string) => void;
 }
@@ -90,6 +92,7 @@ export async function handleUtterance(
   const { actions } = await postEvent(event, {
     coreUrl: deps.coreUrl,
     fetchImpl: deps.fetchImpl,
+    timeoutMs: deps.coreTimeoutMs,
     log,
   });
   await executeActions(actions, { session: u.session, placer: deps.placer, log });

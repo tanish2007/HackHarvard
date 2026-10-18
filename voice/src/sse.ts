@@ -75,3 +75,36 @@ export function silenceStream(model: string, reason: string): string {
     "data: [DONE]\n\n"
   );
 }
+
+/**
+ * Build the start of a stream that will be finished later.
+ *
+ * Used for a spoken filler such as "One moment... " while Core is still
+ * thinking. The stream stays open, and {@link continuationStream} finishes it.
+ * Text that ends with an ellipsis and a space is spoken smoothly by
+ * ElevenLabs, per its guidance on slow custom LLMs.
+ *
+ * Args:
+ *   model: The model name to echo.
+ *   text: The filler to speak now.
+ *
+ * Returns:
+ *   One SSE chunk with no stop and no `[DONE]`.
+ */
+export function openingChunk(model: string, text: string): string {
+  return chunk(model, { role: "assistant", content: text }, null);
+}
+
+/**
+ * Build the end of a stream that {@link openingChunk} started.
+ *
+ * Args:
+ *   model: The model name to echo.
+ *   text: The rest of what the agent should say.
+ *
+ * Returns:
+ *   The text chunk, a stop chunk and `[DONE]`.
+ */
+export function continuationStream(model: string, text: string): string {
+  return chunk(model, { content: text }, null) + chunk(model, {}, "stop") + "data: [DONE]\n\n";
+}
