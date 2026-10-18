@@ -58,13 +58,47 @@ describe("GET /state", () => {
 
 describe("Core router errors", () => {
   it("answers malformed JSON with a 400 using only Core's own error handler", async () => {
-    const res = await request(coreApp().app).post("/state").set("content-type", "application/json").send("{bad");
+    const res = await request(coreApp().app).post("/event").set("content-type", "application/json").send("{bad");
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: "invalid_json" });
   });
 
   it("leaves unknown routes to fall through as 404", async () => {
     expect((await request(coreApp().app).get("/nope")).status).toBe(404);
+  });
+
+  it("does not parse bodies on GET /state", async () => {
+    const res = await request(coreApp().app).get("/state").set("content-type", "application/json").send("{bad");
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("Core's JSON parser stays on Core's routes", () => {
+  /**
+   * Mount Core, then a route owned by another lane that needs the raw body.
+   *
+   * Returns:
+   *     express.Express: The app.
+   */
+  function appWithTextRoute(): express.Express {
+    const { app } = coreApp();
+    app.post("/text/webhook", express.raw({ type: "*/*" }), (req, res) => {
+      res.json({ raw: Buffer.isBuffer(req.body) });
+    });
+    return app;
+  }
+
+  it("leaves the raw body for a route mounted after Core", async () => {
+    const res = await request(appWithTextRoute()).post("/text/webhook").send({ hello: "photon" });
+    expect(res.body).toEqual({ raw: true });
+  });
+
+  it("does not answer another lane's malformed JSON with Core's 400", async () => {
+    const res = await request(appWithTextRoute())
+      .post("/text/webhook")
+      .set("content-type", "application/json")
+      .send("{bad");
+    expect(res.status).toBe(200);
   });
 });
 

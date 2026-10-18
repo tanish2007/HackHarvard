@@ -157,6 +157,28 @@ describe("scenario.json: references and simulated population limits", () => {
   });
 });
 
+describe("scenario.json: duplicate ids", () => {
+  it("rejects a named person whose id collides with a generated sim_ id", () => {
+    const edit: Edit = (f) => f.people.push({ ...f.people[0], person_id: "sim_001", name: "Collider" });
+    expect(errorMessage(() => loadEdited(edit))).toMatch(/Duplicate person_id "sim_001"/);
+  });
+
+  const dupes: [string, Edit, RegExp][] = [
+    ["shelter", (f) => f.shelters.push({ ...f.shelters[0], name: "Copy" }), /Duplicate shelter id "sh_a"/],
+    ["zone", (f) => f.zones.push({ ...f.zones[0], name: "Copy" }), /Duplicate zone id "zone_1"/],
+    ["unit", (f) => f.units.push({ ...f.units[0], name: "Copy" }), /Duplicate unit_id "u_4"/],
+    ["agent", (f) => f.agents.push({ ...f.agents[0] }), /Duplicate agent_id "gov_county"/],
+    ["person and unit", (f) => (f.units[0].unit_id = "p_amit"), /Duplicate person or unit id "p_amit"/],
+    ["unit and generated person", (f) => (f.units[0].unit_id = "sim_002"), /Duplicate person or unit id "sim_002"/],
+    ["person and the reserved emergency_contact", (f) => (f.people[2].person_id = "emergency_contact"), /"emergency_contact"/],
+    ["unit and the reserved emergency_contact", (f) => (f.units[0].unit_id = "emergency_contact"), /"emergency_contact"/],
+  ];
+
+  it.each(dupes)("rejects a duplicate %s id", (_label, edit, message) => {
+    expect(errorMessage(() => loadEdited(edit))).toMatch(message);
+  });
+});
+
 describe("scenario.json: unreadable files", () => {
   it("names the file when scenario.json is missing", () => {
     const dir = join(writeScenarioDir(), "nowhere");
