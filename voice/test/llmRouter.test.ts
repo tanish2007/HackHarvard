@@ -46,6 +46,26 @@ describe("custom LLM endpoint", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("holds the family call as soon as Amit is on the line, even before he speaks", async () => {
+    const onCallLive = vi.fn();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ actions: [] }), { status: 200 }));
+    const app = express();
+    app.use(
+      createLlmRouter({
+        secret: "s3cret",
+        coreUrl: "http://core",
+        placer: { placeCall: vi.fn(async () => {}) },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        log: () => {},
+        onCallLive,
+      }),
+    );
+    app.use(actionsErrorHandler);
+    await request(app).post(PATH).send(body("..."));
+    expect(onCallLive).toHaveBeenCalledWith("p_amit");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("sends a check-in answer to Core with the call's person and number", async () => {
     const { app, fetchImpl } = build({ actions: [{ type: "say", text: "Glad you are safe." }] });
     const res = await request(app).post(PATH).send(body("I am okay"));

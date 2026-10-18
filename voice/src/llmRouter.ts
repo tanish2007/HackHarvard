@@ -54,6 +54,11 @@ export interface LlmRouterDeps {
   duplicateWindowMs?: number;
   /** Logger. Defaults to console.warn. */
   log?: (msg: string) => void;
+  /**
+   * Told when a phone call is in progress, including while the caller is
+   * still silent, so Core holds the family call.
+   */
+  onCallLive?: (personId: string) => void;
 }
 
 /**
@@ -143,6 +148,7 @@ export function createLlmRouter(deps: LlmRouterDeps): Router {
         canSkip ? silenceStream(model, reason) : speechStream(model, "");
 
       const context = parseCallContext(messages);
+      if (channel === "voice" && context.personId) deps.onCallLive?.(context.personId);
       const utteranceDeps: UtteranceDeps = {
         coreUrl: deps.coreUrl,
         placer: deps.placer,

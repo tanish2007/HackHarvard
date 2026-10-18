@@ -68,7 +68,7 @@ if (process.env.GEMINI_API_KEY) {
 
 // Check-in chains after an alert. It never calls 911: only the dashboard's
 // confirm button does, after a human decides.
-const escalation = createEscalationEngine({ store, dispatcher });
+const escalation = createEscalationEngine({ store, dispatcher, data });
 const watcher = createHazardWatcher({ store, data, dispatcher, checkins: escalation });
 
 const app = express();
@@ -80,6 +80,7 @@ app.use(
     dispatcher,
     watcher,
     escalation,
+    data,
     adminToken: process.env.RELAY_ADMIN_TOKEN || undefined,
   }),
 );

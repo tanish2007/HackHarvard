@@ -26,6 +26,9 @@
     }
   ],
   "fire_area": { "lat": 42.365, "lng": -71.122, "radius_km": 1.0 },
+  "extra_fires": [
+    { "id": "hz_mount_ida", "lat": 42.2942, "lng": -71.1929, "radius_km": 1.0 }
+  ],
   "places": [
     { "id": "pl_command_post", "name": "Command Post", "aliases": ["cp", "staging", "base"], "lat": 42.3718, "lng": -71.1075 },
     { "id": "pl_oak_st", "name": "Oak St", "aliases": ["oak street"], "lat": 42.3735, "lng": -71.121 },
@@ -66,10 +69,10 @@
       "name": "Priya",
       "role": "resident",
       "phone": "+16175550102",
-      "lat": 42.3776,
-      "lng": -71.115,
+      "lat": 42.435,
+      "lng": -71.1062,
       "language": "gu",
-      "zone": "zone_1",
+      "zone": null,
       "household_id": "h_patel",
       "family_contact": "p_amit",
       "initial_status": "unconfirmed",
@@ -111,8 +114,8 @@
     { "agent_id": "hh_patel", "kind": "household", "household_id": "h_patel", "trusts": ["gov_county"] }
   ],
   "settings": {
-    "checkin_timeout_sec": 60,
-    "escalation_timeout_sec": 60,
+    "checkin_timeout_sec": 10,
+    "escalation_timeout_sec": 10,
     "hazard_poll_sec": 30,
     "alert_radius_km": 4,
     "wake_phrase": "relay",

@@ -80,6 +80,64 @@ describe("ElevenLabsPlacer", () => {
     expect(f).not.toHaveBeenCalled();
   });
 
+  it("holds the family call once the check-in transcript starts", async () => {
+    const live = vi.fn();
+    let polls = 0;
+    const f = vi.fn(async (url: string) => {
+      if (String(url).includes("outbound-call")) return new Response(JSON.stringify({ conversation_id: "conv_1" }), { status: 200 });
+      polls += 1;
+      return new Response(JSON.stringify({ status: polls < 2 ? "in-progress" : "done", transcript: [{ message: "This is Relay." }] }), { status: 200 });
+    });
+    const placer = new ElevenLabsPlacer({
+      apiKey: "key",
+      agentId: "agent_1",
+      phoneNumberId: "phnum_1",
+      resolveNumber: () => "+15550001111",
+      fetchImpl: f as unknown as typeof fetch,
+      onCallLive: live,
+    });
+    await placer.placeCall("p_amit", "Are you okay?", "missed_checkin", null);
+    await vi.waitFor(() => expect(live).toHaveBeenCalledWith("p_amit"), { timeout: 2000 });
+    await vi.waitFor(() => expect(polls).toBeGreaterThanOrEqual(2), { timeout: 2000 });
+  });
+
+  it("holds the family call when the call is in progress before a transcript", async () => {
+    const live = vi.fn();
+    const f = vi.fn(async (url: string) => {
+      if (String(url).includes("outbound-call")) return new Response(JSON.stringify({ conversation_id: "conv_3" }), { status: 200 });
+      return new Response(JSON.stringify({ status: "in-progress", transcript: [] }), { status: 200 });
+    });
+    const placer = new ElevenLabsPlacer({
+      apiKey: "key",
+      agentId: "agent_1",
+      phoneNumberId: "phnum_1",
+      resolveNumber: () => "+15550001111",
+      fetchImpl: f as unknown as typeof fetch,
+      onCallLive: live,
+    });
+    await placer.placeCall("p_amit", "Are you okay?", "missed_checkin", null);
+    await vi.waitFor(() => expect(live).toHaveBeenCalledWith("p_amit"), { timeout: 2000 });
+  });
+
+  it("does not hold the family call while the phone is still ringing", async () => {
+    const live = vi.fn();
+    const f = vi.fn(async (url: string) => {
+      if (String(url).includes("outbound-call")) return new Response(JSON.stringify({ conversation_id: "conv_2" }), { status: 200 });
+      return new Response(JSON.stringify({ status: "done", transcript: [] }), { status: 200 });
+    });
+    const placer = new ElevenLabsPlacer({
+      apiKey: "key",
+      agentId: "agent_1",
+      phoneNumberId: "phnum_1",
+      resolveNumber: () => "+15550001111",
+      fetchImpl: f as unknown as typeof fetch,
+      onCallLive: live,
+    });
+    await placer.placeCall("p_amit", "Are you okay?", "missed_checkin", null);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(live).not.toHaveBeenCalled();
+  });
+
   it("throws with the status when ElevenLabs rejects", async () => {
     const f = vi.fn(async () => new Response("bad agent", { status: 422 }));
     await expect(

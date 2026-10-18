@@ -77,6 +77,19 @@ export interface HazardWatcher {
    */
   runOnce(): Promise<AlertSummary>;
 
+  /**
+   * Text one resident about the fire and start their check-in, even when
+   * they are outside the alert radius.
+   *
+   * Args:
+   *     personId (string): Who to alert.
+   *
+   * Returns:
+   *     Promise<AlertSummary>: What was sent. `alerted` is 0 when the person
+   *         cannot be texted or there is no fire.
+   */
+  alertPerson(personId: string): Promise<AlertSummary>;
+
   /** Run now, then every settings.hazard_poll_sec until stop(). */
   start(): void;
 
@@ -160,6 +173,7 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
     for (const p of store.listPeople()) {
       if (p.lat !== null && p.lng !== null) far = Math.max(far, distanceKm(c.lat, c.lng, p.lat, p.lng));
     }
+    for (const fire of store.scenario.extra_fires) far = Math.max(far, distanceKm(c.lat, c.lng, fire.lat, fire.lng));
     return Math.ceil((far + settings.alert_radius_km) * 10) / 10;
   };
 
@@ -331,10 +345,65 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
     });
   };
 
+  /**
+   * Text one resident about the nearest fire, ignoring the alert radius.
+   *
+   * Loads the fire onto the map first when it is not there yet.
+   *
+   * Args:
+   *     personId (string): Who to alert.
+   *
+   * Returns:
+   *     Promise<AlertSummary>: The one text, or an empty summary.
+   */
+  const alertPerson = async (personId: string): Promise<AlertSummary> => {
+    const gen = generation;
+    const person = store.getPerson(personId);
+    if (!person || person.role !== "resident" || !person.handle || person.lat === null || person.lng === null) return empty();
+    if (store.listHazards().every((hazard) => hazard.kind !== "fire")) {
+      try {
+        const hazards = await data.getHazards(incident.center.lat, incident.center.lng, pollRadiusKm());
+        if (gen !== generation) return empty();
+        store.setHazards(hazards);
+      } catch (err) {
+        log(`[watcher] get_hazards failed: ${String(err)}`);
+      }
+    }
+    const fires = store.listHazards().filter((hazard) => hazard.kind === "fire");
+    if (fires.length === 0 || gen !== generation) return empty();
+    const nearest = fires
+      .map((hazard) => ({ hazard, edgeKm: distanceKm(person.lat as number, person.lng as number, hazard.lat, hazard.lng) - hazard.radius_km }))
+      .sort((a, b) => a.edgeKm - b.edgeKm)[0];
+    const forecasting = forecastSpread(gen);
+    try {
+      const { action, alert } = await buildAlert(person, nearest);
+      if (gen !== generation || !store.getPerson(personId)) return empty();
+      alerted.set(person.person_id, [...(alerted.get(person.person_id) ?? []), nearest.hazard]);
+      logPushed(store, [action]);
+      const where = alert.inside ? "inside the fire area" : `fire ${alert.fireKm.toFixed(1)} km ${alert.direction}`;
+      const to = alert.shelter ? `, nearest shelter ${alert.shelter.name}` : "";
+      store.addTimeline({ channel: "system", who: "Relay", text: `Fire alert sent to ${person.name} (${where}${to})` });
+      options.checkins?.start(person.person_id);
+      await dispatcher.push([action]);
+      return { alerted: 1, person_ids: [person.person_id], hazards: store.listHazards().length };
+    } finally {
+      await forecasting;
+    }
+  };
+
   const watcher: HazardWatcher = {
     runOnce() {
       const result = queue.then(run).catch((err): AlertSummary => {
         log(`[watcher] run failed: ${String(err)}`);
+        return empty();
+      });
+      queue = result;
+      return result;
+    },
+
+    alertPerson(personId) {
+      const result = queue.then(() => alertPerson(personId)).catch((err): AlertSummary => {
+        log(`[watcher] alert failed for ${personId}: ${String(err)}`);
         return empty();
       });
       queue = result;

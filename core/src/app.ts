@@ -12,6 +12,7 @@ import type { HazardWatcher } from "./alerts/watcher.js";
 import type { EscalationEngine } from "./escalation/engine.js";
 import { handleEvent, type Agent } from "./event/handle.js";
 import { parseEvent } from "./event/schema.js";
+import type { DataTools } from "./data/types.js";
 import type { Dispatcher } from "./dispatch/outbound.js";
 import { asyncHandler, jsonErrorHandler } from "./lib/asyncHandler.js";
 import type { Scenario } from "./scenario/schema.js";
@@ -44,6 +45,7 @@ export interface CoreDeps {
   watcher?: HazardWatcher;
   escalation?: EscalationEngine;
   adminToken?: string;
+  data?: DataTools;
 }
 
 /** Body of POST /escalations/:person_id/confirm. Every field is optional. */
@@ -145,13 +147,48 @@ export function createCoreRouter(deps: CoreDeps): Router {
         return;
       }
       res.json(
-        await handleEvent(parsed.event, { store: deps.store, agent: deps.agent, escalation: deps.escalation, dispatcher: deps.dispatcher }),
+        await handleEvent(parsed.event, {
+          store: deps.store,
+          agent: deps.agent,
+          escalation: deps.escalation,
+          dispatcher: deps.dispatcher,
+          data: deps.data,
+        }),
       );
     }),
   );
 
   // The dashboard's button for a person in SOS. Relay never calls 911 on its
   // own: this is the only way the emergency contact gets a call.
+  // Voice pings this while a check-in call is connected, so the family phone
+  // is not dialed on the timer just because the opening line is still playing.
+  router.post(
+    "/escalations/:person_id/live",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!deps.escalation) {
+        res.status(503).json({ error: "escalation_off" });
+        return;
+      }
+      res.json({ ok: deps.escalation.noteCallLive(req.params.person_id) });
+    }),
+  );
+
+  // Voice pings this when an outbound check-in or family call ends without
+  // a person answering, including a hang-up and voicemail.
+  router.post(
+    "/escalations/:person_id/ended",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!deps.escalation) {
+        res.status(503).json({ error: "escalation_off" });
+        return;
+      }
+      deps.escalation.callEnded(req.params.person_id);
+      res.json({ ok: true });
+    }),
+  );
+
   router.options("/escalations/:person_id/confirm", preflight);
   router.post(
     "/escalations/:person_id/confirm",
@@ -190,6 +227,24 @@ export function createCoreRouter(deps: CoreDeps): Router {
         return;
       }
       res.json(await deps.watcher.runOnce());
+    }),
+  );
+
+  // One resident, even outside the alert radius. The demo uses this when a
+  // live location has carried them out of range.
+  router.post(
+    "/admin/alert/:person_id",
+    asyncHandler(async (req, res) => {
+      if (!deps.watcher) {
+        res.status(503).json({ error: "watcher_off" });
+        return;
+      }
+      const personId = req.params.person_id;
+      if (!deps.store.getPerson(personId)) {
+        res.status(404).json({ error: "unknown_person" });
+        return;
+      }
+      res.json(await deps.watcher.alertPerson(personId));
     }),
   );
 

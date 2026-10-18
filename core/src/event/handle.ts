@@ -6,9 +6,11 @@
  * anything itself. It only returns actions for the channels to carry out.
  */
 import type { CoreResponse, RelayAction, RelayEvent } from "../contracts.js";
+import type { DataTools } from "../data/types.js";
 import type { Dispatcher } from "../dispatch/outbound.js";
 import { detectLanguage } from "../lang/detect.js";
 import { resolveLang } from "../lang/languages.js";
+import { compassDirection, judgeMove } from "../lib/geo.js";
 import { handleKey } from "../lib/phone.js";
 import { classify } from "../rules/fastpath.js";
 import type { PersonStatus } from "../scenario/schema.js";
@@ -52,9 +54,10 @@ export type Agent = (ctx: AgentContext) => Promise<RelayAction[]>;
  *     store (IncidentStore): The live incident state.
  *     agent (Agent | undefined): The LLM agent. Without it, unmatched
  *         messages get a fixed fallback reply.
- *     escalation ({ contactReceived(personId: string): void } | undefined):
- *         Told whenever a person gets in touch, so their check-in chain
- *         stops. Without it, no chains run.
+ *     escalation ({ contactReceived, notAnswered } | undefined): Told
+ *         whenever a person gets in touch, so their check-in chain stops.
+ *         A voicemail greeting calls notAnswered so the family phone is
+ *         still dialed. Without it, no chains run.
  *     dispatcher (Pick<Dispatcher, "push"> | undefined): Pushes actions
  *         for anyone other than the sender, e.g. the family text after an
  *         SOS, straight to the lane that carries them out. A channel only
@@ -64,8 +67,9 @@ export type Agent = (ctx: AgentContext) => Promise<RelayAction[]>;
 export interface HandlerDeps {
   store: IncidentStore;
   agent?: Agent;
-  escalation?: { contactReceived(personId: string): void };
+  escalation?: { contactReceived(personId: string): void; notAnswered?(personId: string): void };
   dispatcher?: Pick<Dispatcher, "push">;
+  data?: DataTools;
 }
 
 /** Who sent an event, after looking them up. */
@@ -75,6 +79,8 @@ interface Sender {
   who: string;
   isNew: boolean;
   rejoined: boolean;
+  /** True when this event repeats the location Core already has. */
+  sameLocation: boolean;
 }
 
 /**
@@ -196,6 +202,16 @@ function resolveSender(event: RelayEvent, deps: HandlerDeps): Sender {
   }
 
   if (unit) store.markUnitHeard(unit.unit_id);
+  const sameLocation = Boolean(
+    person &&
+      !isNew &&
+      event.location &&
+      !event.text.trim() &&
+      person.lat !== null &&
+      person.lng !== null &&
+      Math.abs(person.lat - event.location.lat) < 0.00001 &&
+      Math.abs(person.lng - event.location.lng) < 0.00001,
+  );
   if (person) {
     // Switch language only when the message clearly is in another one, so
     // even the first reply to a new Spanish texter is in Spanish.
@@ -206,12 +222,15 @@ function resolveSender(event: RelayEvent, deps: HandlerDeps): Sender {
   }
 
   const who = unit?.name ?? person?.name ?? (event.channel === "radio" ? "Radio" : "Unknown caller");
-  store.addTimeline({ channel: event.channel, who, text: describeInbound(event) });
+  if (!sameLocation) store.addTimeline({ channel: event.channel, who, text: describeInbound(event) });
   if (isNew) store.addTimeline({ channel: "system", who: "Relay", text: `${who} signed up by text` });
   if (rejoined) store.addTimeline({ channel: "system", who: "Relay", text: `${who} signed up again after STOP` });
   // After the inbound line, so the timeline reads "Amit: ..." then "check-in stopped".
-  if (person) deps.escalation?.contactReceived(person.person_id);
-  return { person, unit, who, isNew, rejoined };
+  // A location ping, a hang-up, or a voicemail greeting is not a reply, so
+  // the next call in the chain is still dialed.
+  if (person && countsAsReply(event)) deps.escalation?.contactReceived(person.person_id);
+  else if (person && event.channel === "voice" && isMachineLine(event.text)) deps.escalation?.notAnswered?.(person.person_id);
+  return { person, unit, who, isNew, rejoined, sameLocation };
 }
 
 /**
@@ -274,7 +293,9 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
         return [reply(replies.sosUnknown(medium, lang))];
       }
       const result = store.setStatus(person.person_id, "sos");
-      const actions = [reply(replies.sos(person.name, medium, person.lat !== null, lang))];
+      const guide = await shelterGuide(deps.data, person, lang);
+      const body = [replies.sos(person.name, medium, person.lat !== null, lang), guide].filter(Boolean).join(" ");
+      const actions = [reply(body)];
       if (result.changed) {
         store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} marked SOS: "${event.text}"` });
         actions.push(...familyAlert(person, store));
@@ -288,17 +309,20 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       const result = store.setStatus(person.person_id, intent as PersonStatus);
       if (result.changed) store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} marked ${intent}` });
       if (result.held) store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} says ${intent}, SOS kept until a responder confirms` });
-      const body =
+      const spoken =
         intent === "safe"
           ? replies.safe(person.name, result.held, medium, lang)
           : replies.enRoute(person.name, result.held, medium, lang);
-      return [reply(body)];
+      return [reply(await appendExit(spoken, event, person, lang, deps))];
     }
 
     case "agent": {
       // No welcome here: Text owns sign-up and already welcomed them before
       // forwarding anything, so this is a real question and gets an answer.
-      if (person && event.location && !event.text.trim()) return [reply(replies.locationThanks(person.name, lang))];
+      if (person && event.location && !event.text.trim()) {
+        if (sender.sameLocation) return [];
+        return [reply(replies.locationThanks(person.name, lang))];
+      }
       // The wake phrase on its own ("Relay.") has no question yet. Say "go ahead"
       // instead of sending the agent an empty request, which it cannot answer.
       if (event.channel === "radio" && !text.trim()) return [reply(replies.radioReady(lang))];
@@ -309,7 +333,8 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       const statusBefore = person?.status;
       try {
         const run = deps.agent({ event, text, person, unit, who: sender.who, signal: controller.signal, sideActions });
-        return await withTimeout(run, agentTimeoutMs(), controller);
+        const actions = await withTimeout(run, agentTimeoutMs(), controller);
+        return await withExitOnCall(actions, event, person, lang, deps);
       } catch (err) {
         console.error(`[core] agent failed for ${event.event_id}:`, err);
         // A tool may already have acted, e.g. set_status sos texted the
@@ -319,7 +344,7 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
           now?.status === "sos" && statusBefore !== "sos"
             ? replies.sos(now.name, medium, now.lat !== null, lang)
             : replies.fallback(incident, channelKind, lang);
-        return [reply(body), ...sideActions];
+        return [reply(await appendExit(body, event, now ?? person, lang, deps)), ...sideActions];
       }
     }
   }
@@ -349,6 +374,216 @@ function withTimeout<T>(promise: Promise<T>, ms: number, controller: AbortContro
     }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * The walk to the nearest shelter from where this person is.
+ *
+ * Args:
+ *     data (DataTools | undefined): Shelter and route lookup. Absent in tests
+ *         that only check the SOS acknowledgement.
+ *     person (TrackedPerson): The person who asked for help.
+ *     lang (string): Their language.
+ *
+ * Returns:
+ *     Promise<string>: One sentence, or "" when their location or a shelter
+ *         is unknown.
+ */
+async function shelterGuide(data: DataTools | undefined, person: TrackedPerson, lang: string): Promise<string> {
+  return (await exitGuide(data, person, lang))?.text ?? "";
+}
+
+/**
+ * The spoken walk out from where this person is.
+ *
+ * A failed route lookup still names the nearest shelter and the direction.
+ * A failed shelter lookup says nothing.
+ *
+ * Args:
+ *     data (DataTools | undefined): Shelter and route lookup.
+ *     person (TrackedPerson): The person on the call.
+ *     lang (string): Their language.
+ *
+ *     from ({ lat: number; lng: number } | null | undefined): Where they
+ *         were when Relay last gave a direction. When set, the sentence
+ *         says whether the move since then was toward the shelter.
+ *
+ * Returns:
+ *     Promise<{ shelter: string; text: string; judged: boolean } | null>:
+ *         The shelter name and the sentence, or null when their location
+ *         is unknown. `judged` is true when the sentence says if the move
+ *         was right or wrong.
+ */
+export async function exitGuide(
+  data: DataTools | undefined,
+  person: TrackedPerson,
+  lang: string,
+  from?: { lat: number; lng: number } | null,
+): Promise<{ shelter: string; text: string; judged: boolean } | null> {
+  if (!data || person.lat === null || person.lng === null) return null;
+  try {
+    const shelters = await data.getShelters(person.lat, person.lng);
+    const shelter = shelters[0];
+    if (!shelter) return null;
+    let minutesAway = Math.max(1, Math.round((shelter.distance_km / 5) * 60));
+    let step = "";
+    try {
+      const route = await data.getRoute(person.lat, person.lng, shelter.lat, shelter.lng, "foot");
+      minutesAway = route.duration_min;
+      step = (route.steps[0] ?? "").replace(/\.$/, "");
+    } catch {
+      // The shelter name and direction are still worth saying.
+    }
+    const toward = compassDirection(person.lat, person.lng, shelter.lat, shelter.lng);
+    const moved = from ? judgeMove(from.lat, from.lng, person.lat, person.lng, shelter.lat, shelter.lng) : null;
+    const text = moved
+      ? replies.moveCheck(moved.judgment, moved.walked, shelter.name, shelter.distance_km, toward, minutesAway, step, lang)
+      : replies.shelterWalk(shelter.name, shelter.distance_km, toward, minutesAway, step, lang);
+    return { shelter: shelter.name, text, judged: moved !== null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Add the walk out to a phone reply when Relay knows where the person is.
+ *
+ * Args:
+ *     body (string): What Relay was already going to say.
+ *     event (RelayEvent): The call or message.
+ *     person (TrackedPerson | undefined): The caller.
+ *     lang (string): Their language.
+ *     deps (HandlerDeps): Shelter and route lookup.
+ *
+ * Returns:
+ *     Promise<string>: The reply, with the walk added on a phone call.
+ */
+async function appendExit(
+  body: string,
+  event: RelayEvent,
+  person: TrackedPerson | undefined,
+  lang: string,
+  deps: HandlerDeps,
+): Promise<string> {
+  return applyExit(body, event, person, lang, deps);
+}
+
+/**
+ * A reply that is only a compass order, such as "move north".
+ *
+ * Args:
+ *     body (string): What Relay was going to say.
+ *
+ * Returns:
+ *     boolean: True when the line is a short direction and not already a
+ *         judgment of the last move.
+ */
+function directionOnly(body: string): boolean {
+  const words = body.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 8) return false;
+  if (/right way|wrong way|have not seen you move/i.test(body)) return false;
+  return /\b(north|south|east|west|head|move|go)\b/i.test(body);
+}
+
+/**
+ * Put the walk, and a right-or-wrong check, on a phone reply.
+ *
+ * The check uses the point Relay last directed them from. Find My updates
+ * the live point in between, so the next thing Relay says can tell them if
+ * that move was toward the shelter.
+ *
+ * Args:
+ *     body (string): What Relay was already going to say.
+ *     event (RelayEvent): The call or message.
+ *     person (TrackedPerson | undefined): The caller.
+ *     lang (string): Their language.
+ *     deps (HandlerDeps): Shelter and route lookup, and the direction anchor.
+ *
+ * Returns:
+ *     Promise<string>: The reply. On a phone call the judgment leads when
+ *         there is one, and a bare "move north" is replaced by it.
+ */
+async function applyExit(
+  body: string,
+  event: RelayEvent,
+  person: TrackedPerson | undefined,
+  lang: string,
+  deps: HandlerDeps,
+): Promise<string> {
+  if (event.channel !== "voice" || !person || person.lat === null || person.lng === null) return body;
+  const from = deps.store.directionAnchor(person.person_id);
+  const guide = await exitGuide(deps.data, person, lang, from);
+  deps.store.rememberDirectionAnchor(person.person_id, person.lat, person.lng);
+  if (!guide) return body;
+  if (directionOnly(body)) return guide.text;
+  if (!guide.judged && body.toLowerCase().includes(guide.shelter.toLowerCase())) return body;
+  if (!body.trim()) return guide.text;
+  if (guide.judged) return `${guide.text} ${body}`;
+  return `${body} ${guide.text}`;
+}
+
+/**
+ * Add the walk out to whatever the agent said on a phone call.
+ *
+ * Args:
+ *     actions (RelayAction[]): The agent's actions.
+ *     event (RelayEvent): The call.
+ *     person (TrackedPerson | undefined): The caller.
+ *     lang (string): Their language.
+ *     deps (HandlerDeps): Shelter and route lookup.
+ *
+ * Returns:
+ *     Promise<RelayAction[]>: The same actions, with the walk on the first
+ *         spoken line when it is not already there.
+ */
+async function withExitOnCall(
+  actions: RelayAction[],
+  event: RelayEvent,
+  person: TrackedPerson | undefined,
+  lang: string,
+  deps: HandlerDeps,
+): Promise<RelayAction[]> {
+  if (event.channel !== "voice" || !person) return actions;
+  let added = false;
+  const next: RelayAction[] = [];
+  for (const action of actions) {
+    if (added || action.type !== "say") {
+      next.push(action);
+      continue;
+    }
+    added = true;
+    next.push({ ...action, text: await applyExit(action.text, event, person, lang, deps) });
+  }
+  if (!added && person.lat !== null && person.lng !== null) {
+    const text = await applyExit("", event, person, lang, deps);
+    if (text.trim()) next.unshift({ type: "say", text });
+  }
+  return next;
+}
+
+/**
+ * Whether this event is the person themselves, rather than a machine.
+ *
+ * A blank message, a voicemail greeting, or a carrier line about the call
+ * ending does not count. A text, or a person speaking on the call, does.
+ *
+ * Args:
+ *     event (RelayEvent): The inbound event.
+ *
+ * Returns:
+ *     boolean: True when the check-in chain should stop.
+ */
+function isMachineLine(text: string): boolean {
+  return /voicemail|voice mail|leave (?:a |your )?message|after the tone|at the (?:tone|beep)|not available|unavailable|can(?:not|'t) take your call|mailbox|record your message|please hang up|you(?:'ve| have) reached|the person you(?:'re| are) (?:trying to reach|calling)|call (?:has ended|ended|disconnected)|subscriber you/i.test(
+    text,
+  );
+}
+
+function countsAsReply(event: RelayEvent): boolean {
+  const text = event.text.trim();
+  if (!text) return false;
+  if (event.channel !== "voice") return true;
+  return !isMachineLine(text);
 }
 
 /**

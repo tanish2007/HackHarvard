@@ -76,6 +76,34 @@ export const TEMPLATES = {
     gu: "{name}, Relay ને તમારો SOS મળ્યો છે. બચાવ ટીમને હમણાં જ જાણ કરવામાં આવી રહી છે. {where}જ્યાં સૌથી સુરક્ષિત હો ત્યાં જ રહો અને તમારો ફોન ચાલુ રાખો. જોખમમાંથી બહાર આવો ત્યારે SAFE મોકલો.",
     hi: "{name}, Relay को आपका SOS मिल गया है। बचाव दल को अभी सूचित किया जा रहा है। {where}जहाँ सबसे सुरक्षित हों वहीं रहें और अपना फ़ोन चालू रखें। ख़तरे से बाहर आने पर SAFE भेजें।",
   },
+  shelterWalk: {
+    en: "Walk to {shelter}, {km} km {direction}, about {min} min. {step}",
+    es: "Camine hacia {shelter}, a {km} km al {direction}, unos {min} min. {step}",
+    zh: "请步行前往{shelter}，在您的{direction}方向 {km} 公里，大约 {min} 分钟。{step}",
+    gu: "{shelter} સુધી ચાલો, {direction} દિશામાં {km} કિમી, લગભગ {min} મિનિટ. {step}",
+    hi: "{shelter} तक पैदल जाइए, {direction} दिशा में {km} किमी, लगभग {min} मिनट। {step}",
+  },
+  moveRight: {
+    en: "Yes, that was the right way. You headed {walked} and got closer. Keep heading {direction} to {shelter}, {km} km, about {min} min. {step}",
+    es: "Sí, iba por el camino correcto. Fue hacia el {walked} y se acercó. Siga hacia el {direction}, a {shelter}, {km} km, unos {min} min. {step}",
+    zh: "对，方向是对的。您往{walked}走了，离目的地更近了。请继续往{direction}方向前往{shelter}，{km} 公里，大约 {min} 分钟。{step}",
+    gu: "હા, એ સાચી દિશા હતી. તમે {walked} તરફ ગયા અને નજીક પહોંચ્યા. {shelter} સુધી {direction} દિશામાં ચાલતા રહો, {km} કિમી, લગભગ {min} મિનિટ. {step}",
+    hi: "हाँ, वह सही दिशा थी। आप {walked} की तरफ गए और करीब पहुँचे। {shelter} तक {direction} दिशा में चलते रहिए, {km} किमी, लगभग {min} मिनट। {step}",
+  },
+  moveWrong: {
+    en: "No, that was the wrong way. You headed {walked}. Turn around and head {direction} to {shelter}, {km} km, about {min} min. {step}",
+    es: "No, iba por el camino equivocado. Fue hacia el {walked}. Dé la vuelta y vaya hacia el {direction}, a {shelter}, {km} km, unos {min} min. {step}",
+    zh: "不对，方向反了。您往{walked}走了。请掉头，往{direction}方向前往{shelter}，{km} 公里，大约 {min} 分钟。{step}",
+    gu: "ના, એ ખોટી દિશા હતી. તમે {walked} તરફ ગયા. પાછા ફરો અને {shelter} સુધી {direction} દિશામાં જાઓ, {km} કિમી, લગભગ {min} મિનિટ. {step}",
+    hi: "नहीं, वह गलत दिशा थी। आप {walked} की तरफ गए। मुड़िए और {shelter} तक {direction} दिशा में जाइए, {km} किमी, लगभग {min} मिनट। {step}",
+  },
+  moveStill: {
+    en: "I have not seen you move yet. Keep heading {direction} to {shelter}, {km} km, about {min} min. {step}",
+    es: "Todavía no veo que se haya movido. Siga hacia el {direction}, a {shelter}, {km} km, unos {min} min. {step}",
+    zh: "我还没有看到您移动。请继续往{direction}方向前往{shelter}，{km} 公里，大约 {min} 分钟。{step}",
+    gu: "હજુ તમે ખસ્યા તેવું દેખાતું નથી. {shelter} સુધી {direction} દિશામાં ચાલતા રહો, {km} કિમી, લગભગ {min} મિનિટ. {step}",
+    hi: "अभी आपकी जगह बदली हुई नहीं दिखी। {shelter} तक {direction} दिशा में चलते रहिए, {km} किमी, लगभग {min} मिनट। {step}",
+  },
   sosAskLocation: {
     en: "Please share your location so responders can find you. ",
     es: "Comparta su ubicación para que los equipos de emergencia puedan encontrarle. ",
@@ -362,6 +390,92 @@ export const replies = {
   },
 
   /**
+   * One sentence pointing someone at the nearest shelter from where they are.
+   *
+   * Args:
+   *     shelter (string): Shelter name.
+   *     kmAway (number): Distance in kilometres.
+   *     compass (string): English compass word from them to the shelter.
+   *     minutesAway (number): Walking time in minutes.
+   *     step (string): First walking instruction. May be empty.
+   *     lang (string): Their language. Defaults to English.
+   *
+   * Returns:
+   *     string: The sentence.
+   */
+  shelterWalk(shelter: string, kmAway: number, compass: string, minutesAway: number, step: string, lang = "en"): string {
+    return this.walkLine("shelterWalk", shelter, kmAway, compass, minutesAway, step, "", lang);
+  },
+
+  /**
+   * Say whether the last move was toward the shelter, then the next walk.
+   *
+   * Args:
+   *     judgment ("closer" | "farther" | "still"): How the move compared
+   *         with the shelter.
+   *     walked (string): Compass word of the move they made. Ignored when
+   *         they have not moved.
+   *     shelter (string): Shelter name.
+   *     kmAway (number): Distance in kilometres.
+   *     compass (string): English compass word from them to the shelter.
+   *     minutesAway (number): Walking time in minutes.
+   *     step (string): First walking instruction. May be empty.
+   *     lang (string): Their language. Defaults to English.
+   *
+   * Returns:
+   *     string: The sentence.
+   */
+  moveCheck(
+    judgment: "closer" | "farther" | "still",
+    walked: string,
+    shelter: string,
+    kmAway: number,
+    compass: string,
+    minutesAway: number,
+    step: string,
+    lang = "en",
+  ): string {
+    const key = judgment === "closer" ? "moveRight" : judgment === "farther" ? "moveWrong" : "moveStill";
+    return this.walkLine(key, shelter, kmAway, compass, minutesAway, step, walked, lang);
+  },
+
+  /**
+   * Fill a walking sentence.
+   *
+   * Args:
+   *     key ("shelterWalk" | "moveRight" | "moveWrong" | "moveStill"): Which sentence.
+   *     shelter (string): Shelter name.
+   *     kmAway (number): Distance in kilometres.
+   *     compass (string): English compass word toward the shelter.
+   *     minutesAway (number): Walking time in minutes.
+   *     step (string): First walking instruction.
+   *     walked (string): English compass word of the move they made.
+   *     lang (string): Their language.
+   *
+   * Returns:
+   *     string: The sentence.
+   */
+  walkLine(
+    key: "shelterWalk" | "moveRight" | "moveWrong" | "moveStill",
+    shelter: string,
+    kmAway: number,
+    compass: string,
+    minutesAway: number,
+    step: string,
+    walked: string,
+    lang: string,
+  ): string {
+    return render(key, lang, {
+      shelter,
+      km: km(kmAway),
+      direction: direction(compass, lang),
+      walked: direction(walked, lang),
+      min: minutes(minutesAway),
+      step,
+    });
+  },
+
+  /**
    * Reply to someone who sent an SOS.
    *
    * Args:
@@ -580,6 +694,24 @@ export const replies = {
    */
   familyCall(name: string, incident: string, lang = "en"): string {
     return render("familyCall", lang, { name, incident });
+  },
+
+  /**
+   * Script for the call to the firefighter unit.
+   *
+   * Used when the resident did not pick up and the family call was cut off
+   * or went to voicemail. This is not a 911 call.
+   *
+   * Args:
+   *     name (string): The resident who needs a check.
+   *     incident (string): Incident name.
+   *     where (string): Spoken last known location.
+   *
+   * Returns:
+   *     string: The spoken script.
+   */
+  responderCall(name: string, incident: string, where: string): string {
+    return `This is Relay, calling about the ${incident}. We could not reach ${name}, and the call to their family was cut off or went to voicemail. Last known location: ${where}. Please check on them.`;
   },
 
   /**

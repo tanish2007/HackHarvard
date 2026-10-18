@@ -40,6 +40,13 @@ if (process.env.FINDMY !== "0") {
   deps.findMy = tracker;
   deps.findMyOverridesScenario = process.env.FINDMY_OVERRIDE === "1";
   tracker.start();
+  // Ask again on a timer. The live feed only talks when Apple sends a point,
+  // and a remembered point is trusted for ten minutes, so a person can move
+  // without Core hearing about it. Fifteen seconds is often enough to catch
+  // a new fix without asking the line on every map refresh.
+  setInterval(() => {
+    void sweepFindMy(deps);
+  }, 15_000);
 }
 
 // Spectrum bridges a single agent loop to many messaging interfaces.

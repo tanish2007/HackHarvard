@@ -41,7 +41,7 @@ def get_hazards(lat, lng, radius_km):
     return fires + weather
 
 
-def get_route(from_lat, from_lng, to_lat, to_lng):
+def get_route(from_lat, from_lng, to_lat, to_lng, profile="driving"):
     """Return a route that stays outside known fire circles.
 
     Args:
@@ -49,10 +49,19 @@ def get_route(from_lat, from_lng, to_lat, to_lng):
         from_lng (float): Start longitude.
         to_lat (float): End latitude.
         to_lng (float): End longitude.
+        profile (str): "foot" asks OpenStreetMap for a walking path.
+            Anything else keeps the driving route.
 
     Returns:
         dict: distance_km, duration_min, steps, polyline, avoided_hazards, source.
     """
+    if profile == "foot":
+        try:
+            return _walking_route(from_lat, from_lng, to_lat, to_lng)
+        except DataSourceError:
+            fallback = _fake_route(from_lat, from_lng, to_lat, to_lng)
+            fallback["source"] = "fallback"
+            return fallback
     return _with_fallback(
         lambda: _real_route(from_lat, from_lng, to_lat, to_lng),
         lambda: _fake_route(from_lat, from_lng, to_lat, to_lng),
@@ -238,11 +247,12 @@ def _fake_hazards(lat, lng, radius_km):
     Returns:
         list[dict]: Matching hazard rows.
     """
-    fire = _scenario_fire(load_scenario())
-    distance = haversine_km(lat, lng, fire["lat"], fire["lng"])
-    if distance > float(radius_km) + float(fire["radius_km"]):
-        return []
-    return [fire]
+    rows = []
+    for fire in _scenario_fires(load_scenario()):
+        distance = haversine_km(lat, lng, fire["lat"], fire["lng"])
+        if distance <= float(radius_km) + float(fire["radius_km"]):
+            rows.append(fire)
+    return rows
 
 
 def _fake_shelters(lat, lng):
@@ -307,6 +317,37 @@ def _fake_weather(lat, lng):
     }
 
 
+def _walking_route(from_lat, from_lng, to_lat, to_lng):
+    """Ask OpenStreetMap for a foot path to the point.
+
+    The scenario fire is the circle to stay outside of. The geometry stays
+    the walking path even if that circle is unavoidable.
+
+    Args:
+        from_lat (float): Start latitude.
+        from_lng (float): Start longitude.
+        to_lat (float): End latitude.
+        to_lng (float): End longitude.
+
+    Returns:
+        dict: Route fields. source is osrm when the path is used.
+
+    Raises:
+        DataSourceError: If OpenStreetMap returns no path.
+    """
+    scenario = load_scenario()
+    return fetch_route(
+        from_lat,
+        from_lng,
+        to_lat,
+        to_lng,
+        _scenario_fires(scenario),
+        _nearest_shelter_name(to_lat, to_lng, scenario),
+        profile="foot",
+        allow_geometric=False,
+    )
+
+
 def _fake_route(from_lat, from_lng, to_lat, to_lng):
     """Build a straight route, detouring around the scenario fire.
 
@@ -326,7 +367,7 @@ def _fake_route(from_lat, from_lng, to_lat, to_lng):
         from_lng,
         to_lat,
         to_lng,
-        [_scenario_fire(scenario)],
+        _scenario_fires(scenario),
         shelter_name,
     )
 
@@ -341,8 +382,36 @@ def _scenario_fire(scenario):
         dict: One fire hazard. The id matches Core's placeholder.
     """
     fire = scenario["fire_area"]
+    return _fire_row("hz_scenario_fire", fire)
+
+
+def _scenario_fires(scenario):
+    """Return every dummy fire, the main one first.
+
+    Args:
+        scenario (dict): Loaded scenario. Extra fires live under extra_fires.
+
+    Returns:
+        list[dict]: Fire hazards in the Contract C shape.
+    """
+    fires = [_scenario_fire(scenario)]
+    for extra in scenario.get("extra_fires") or []:
+        fires.append(_fire_row(extra["id"], extra))
+    return fires
+
+
+def _fire_row(fire_id, fire):
+    """One fire circle in the hazard shape.
+
+    Args:
+        fire_id (str): Hazard id.
+        fire (dict): lat, lng, and radius_km.
+
+    Returns:
+        dict: A fire hazard with source fake.
+    """
     return {
-        "id": "hz_scenario_fire",
+        "id": fire_id,
         "kind": "fire",
         "lat": fire["lat"],
         "lng": fire["lng"],

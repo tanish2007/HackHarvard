@@ -4,7 +4,7 @@
  * which way the fire is.
  */
 import { describe, expect, it } from "vitest";
-import { compassDirection, distanceKm, escapeFrom } from "../src/lib/geo.js";
+import { compassDirection, distanceKm, escapeFrom, judgeMove } from "../src/lib/geo.js";
 import { replies } from "../src/event/replies.js";
 
 const pairs: [string, number, number, number, number][] = [
@@ -110,5 +110,21 @@ describe("escapeFrom", () => {
     expect(replies.checkinCall("Oak Ridge Fire", "en", escape)).toMatch(/northeast of you\. To get away from the fire, head southwest\. Are you safe/);
     expect(replies.checkinCall("Oak Ridge Fire", "es", escape)).toContain("suroeste");
     expect(replies.checkinCall("Oak Ridge Fire", "en")).not.toMatch(/head/);
+  });
+});
+
+describe("judgeMove", () => {
+  const goal = { lat: 42.3778, lng: -71.1186 };
+
+  it("calls a move toward the shelter the right way", () => {
+    expect(judgeMove(42.374, -71.1175, 42.376, -71.118, goal.lat, goal.lng)).toMatchObject({ judgment: "closer", walked: "north" });
+  });
+
+  it("calls a move away from the shelter the wrong way", () => {
+    expect(judgeMove(42.374, -71.1175, 42.37, -71.1175, goal.lat, goal.lng)).toMatchObject({ judgment: "farther", walked: "south" });
+  });
+
+  it("ignores a shift too small to be a real step", () => {
+    expect(judgeMove(42.374, -71.1175, 42.37405, -71.1175, goal.lat, goal.lng).judgment).toBe("still");
   });
 });

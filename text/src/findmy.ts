@@ -100,13 +100,28 @@ export class FindMyTracker {
     const key = normalizePhone(handle);
     const known = this.seen.get(key);
     if (known && this.now() - known.at <= this.staleMs) return known.location;
-    if (!this.source) return known?.location ?? null;
+    return this.ask(handle, timeoutMs);
+  }
 
+  /**
+   * Ask the feed for a fresh point, even when a recent one is remembered.
+   *
+   * Args:
+   *     handle: Their phone number or iMessage email.
+   *     timeoutMs: How long to wait for the direct request. Defaults to 5000.
+   *
+   * Returns:
+   *     Location | null: The newest point, or the last remembered one if the
+   *         request fails. Null when nothing has ever been seen. Never throws.
+   */
+  async ask(handle: string, timeoutMs = 5000): Promise<Location | null> {
+    const key = normalizePhone(handle);
+    if (!this.source) return this.seen.get(key)?.location ?? null;
     try {
       const update = await withTimeout(this.source.get(handle), timeoutMs);
       this.remember(update);
     } catch {
-      // Fall through to whatever is remembered, however old.
+      // Keep the previous point. A missed poll is not a lost person.
     }
     return this.seen.get(key)?.location ?? null;
   }

@@ -5,19 +5,24 @@
  * After an alert, each person gets a chain of timers:
  *     1. checkin_timeout_sec with no word from them: Relay calls them and
  *        asks if they are safe (reason "missed_checkin").
- *     2. escalation_timeout_sec more: Relay calls their family contact
- *        (reason "escalation").
- *     3. escalation_timeout_sec more: they are flagged SOS on the dashboard,
- *        for a human to confirm.
- * Any event from the person stops the chain at whatever stage it is in.
+ *     2. escalation_timeout_sec after that call is not picked up, or goes
+ *        to voicemail: Relay calls their family contact (reason
+ *        "escalation"). If the person picks up, that call is cancelled.
+ *     3. escalation_timeout_sec after the family call is cut off or goes
+ *        to voicemail: Relay calls the firefighter unit (reason "responder")
+ *        and flags SOS on the dashboard.
+ * Any real reply from the person, or from the family contact on that call,
+ * stops the chain.
  *
- * Relay never dials 911 by itself. The chain ends at a dashboard flag. Only
- * confirm(), which a responder triggers from the dashboard, calls the
+ * Relay never dials 911 by itself. The firefighter unit is a scenario phone.
+ * Only confirm(), which a responder triggers from the dashboard, calls the
  * emergency contact.
  */
 import type { PlaceCallAction } from "../contracts.js";
+import type { DataTools } from "../data/types.js";
 import type { Dispatcher, PushResult } from "../dispatch/outbound.js";
 import { logPushed } from "../event/alerts.js";
+import { exitGuide } from "../event/handle.js";
 import { replies } from "../event/replies.js";
 import { distanceKm, escapeFrom } from "../lib/geo.js";
 import { realScheduler, type Cancel, type Scheduler } from "../lib/scheduler.js";
@@ -31,7 +36,7 @@ export const EMERGENCY_PERSON_ID = "emergency_contact";
 const AT_PLACE_KM = 0.1;
 
 /** Which step a chain will run next. */
-export type ChainStage = "checkin" | "family" | "sos";
+export type ChainStage = "checkin" | "family" | "responder" | "sos";
 
 /**
  * Why a confirm was refused.
@@ -66,6 +71,8 @@ export type ConfirmResult =
  *         real time. Pass the store's clock in tests.
  *     log ((msg: string) => void | undefined): Error log. Defaults to
  *         console.error.
+ *     data (DataTools | undefined): Shelter and route lookup. When set, the
+ *         check-in call includes the walk from the person's exact coordinates.
  */
 export interface EscalationOptions {
   store: IncidentStore;
@@ -73,6 +80,7 @@ export interface EscalationOptions {
   scheduler?: Scheduler;
   now?: () => Date;
   log?: (msg: string) => void;
+  data?: DataTools;
 }
 
 /** Starts, stops, and confirms escalations. */
@@ -121,6 +129,35 @@ export interface EscalationEngine {
    */
   confirm(personId: string, confirmedBy?: string): Promise<ConfirmResult>;
 
+  /**
+   * The check-in call is connected, so do not dial the family contact.
+   *
+   * Args:
+   *     personId (string): Who is on the call.
+   *
+   * Returns:
+   *     boolean: True if a family call was waiting and got cancelled.
+   */
+  noteCallLive(personId: string): boolean;
+
+  /**
+   * The call we just placed was not answered: voicemail, a carrier message,
+   * or the line was cut. The next call waits escalation_timeout_sec.
+   *
+   * Args:
+   *     personId (string): Who we were calling, the resident or their family.
+   */
+  notAnswered(personId: string): void;
+
+  /**
+   * The outbound call ended. If the person had already picked up, this does
+   * not dial their family contact.
+   *
+   * Args:
+   *     personId (string): Who we were calling.
+   */
+  callEnded(personId: string): void;
+
   /** Cancel every chain and forget every confirm, for the demo reset. */
   reset(): void;
 }
@@ -132,6 +169,10 @@ interface Chain {
   /** Status when the chain started. If someone else changes it, the chain stops. */
   startStatus: PersonStatus;
   familyCalled: boolean;
+  /** True once the check-in call is connected to a person, not a machine. */
+  onCall: boolean;
+  /** True once that call is known to be voicemail or a carrier message. */
+  voicemail: boolean;
 }
 
 /**
@@ -206,11 +247,14 @@ export function createEscalationEngine(options: EscalationOptions): EscalationEn
         // Tell them which way is away from the fire before asking anything.
         const fires = store.listHazards().filter((h) => h.kind === "fire");
         const escape = person.lat !== null && person.lng !== null ? escapeFrom(person.lat, person.lng, fires) : null;
+        const guide = await exitGuide(options.data, person, person.language);
+        if (person.lat !== null && person.lng !== null) store.rememberDirectionAnchor(person.person_id, person.lat, person.lng);
+        const opening = replies.checkinCall(incident, person.language, escape ?? undefined);
         await pushCall({
           type: "place_call",
           person_id: person.person_id,
           to: person.handle,
-          script: replies.checkinCall(incident, person.language, escape ?? undefined),
+          script: guide ? `${opening} ${guide.text}` : opening,
           reason: "missed_checkin",
         });
       } else {
@@ -223,9 +267,12 @@ export function createEscalationEngine(options: EscalationOptions): EscalationEn
     }
 
     if (chain.stage === "family") {
+      if (chain.onCall && !chain.voicemail) return;
       const family = person.family_contact ? store.getPerson(person.family_contact) : undefined;
       if (family && isCallable(family.handle)) {
         chain.familyCalled = true;
+        chain.onCall = false;
+        chain.voicemail = false;
         await pushCall({
           type: "place_call",
           person_id: family.person_id,
@@ -233,20 +280,75 @@ export function createEscalationEngine(options: EscalationOptions): EscalationEn
           script: replies.familyCall(person.name, incident, family.language),
           reason: "escalation",
         });
-      } else {
-        store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} has no family contact Relay can call` });
+        if (chains.get(personId) !== chain) return;
+        // Wait until this call is cut off or goes to voicemail. A live
+        // answer cancels the chain. There is no timer while it is ringing.
+        chain.stage = "responder";
+        return;
       }
+      store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} has no family contact Relay can call` });
       if (chains.get(personId) !== chain) return;
-      chain.stage = "sos";
+      chain.stage = "responder";
       schedule(personId, chain, settings.escalation_timeout_sec);
       return;
+    }
+
+    if (chain.stage === "responder") {
+      const unit = chain.familyCalled || isCallable(person.handle) ? store.scenario.units.find((u) => isCallable(u.phone)) : undefined;
+      if (unit) {
+        await pushCall({
+          type: "place_call",
+          person_id: unit.unit_id,
+          to: unit.phone,
+          script: replies.responderCall(person.name, incident, describeWhere(person, store)),
+          reason: "responder",
+        });
+      } else {
+        store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} has no firefighter unit Relay can call` });
+      }
+      if (chains.get(personId) !== chain) return;
     }
 
     chains.delete(personId);
     const result = store.setStatus(personId, "sos");
     if (result.changed) {
-      const after = chain.familyCalled ? "check-in and family call" : "check-in";
+      const reachedFirefighter = chain.stage === "responder" && store.scenario.units.some((u) => isCallable(u.phone));
+      const after = reachedFirefighter ? "check-in, family call, and firefighter call" : chain.familyCalled ? "check-in and family call" : "check-in";
       store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} unreachable after ${after}, needs human confirmation` });
+    }
+  };
+
+  /**
+   * The current outbound call failed. Start the 10 second wait for the next one.
+   *
+   * A check-in failure leads to the family call. A family-call failure leads
+   * to the firefighter. A second failure does not reset that wait.
+   *
+   * Args:
+   *     personId (string): Who we were calling.
+   */
+  const failCall = (personId: string): void => {
+    const own = chains.get(personId);
+    if (own && own.stage === "family" && !own.voicemail) {
+      own.voicemail = true;
+      own.onCall = false;
+      own.cancel();
+      schedule(personId, own, settings.escalation_timeout_sec);
+      return;
+    }
+    for (const [id, chain] of chains) {
+      if (store.getPerson(id)?.family_contact !== personId || chain.stage !== "responder" || chain.voicemail) continue;
+      chain.voicemail = true;
+      chain.onCall = false;
+      chain.cancel();
+      const family = store.getPerson(personId)?.name ?? personId;
+      const name = store.getPerson(id)?.name ?? id;
+      store.addTimeline({
+        channel: "system",
+        who: "Relay",
+        text: `${family}'s call was cut off or went to voicemail, firefighter call for ${name} in ${settings.escalation_timeout_sec} seconds`,
+      });
+      schedule(id, chain, settings.escalation_timeout_sec);
     }
   };
 
@@ -255,23 +357,72 @@ export function createEscalationEngine(options: EscalationOptions): EscalationEn
       const person = store.getPerson(personId);
       if (!person || person.status === "sos") return false;
       chains.get(personId)?.cancel();
-      const chain: Chain = { stage: "checkin", cancel: () => {}, startStatus: person.status, familyCalled: false };
+      const chain: Chain = {
+        stage: "checkin",
+        cancel: () => {},
+        startStatus: person.status,
+        familyCalled: false,
+        onCall: false,
+        voicemail: false,
+      };
       chains.set(personId, chain);
       schedule(personId, chain, settings.checkin_timeout_sec);
       return true;
     },
 
     contactReceived(personId) {
-      const chain = chains.get(personId);
-      if (!chain) return;
-      chain.cancel();
-      chains.delete(personId);
       const name = store.getPerson(personId)?.name ?? personId;
-      store.addTimeline({ channel: "system", who: "Relay", text: `${name} got in touch, check-in stopped` });
+      const ids = new Set<string>();
+      if (chains.has(personId)) ids.add(personId);
+      for (const [id, chain] of chains) {
+        if (store.getPerson(id)?.family_contact === personId && chain.stage === "responder") ids.add(id);
+      }
+      for (const id of ids) {
+        const chain = chains.get(id);
+        if (!chain) continue;
+        chain.cancel();
+        chains.delete(id);
+        const whose = store.getPerson(id)?.name ?? id;
+        const text = id === personId ? `${name} got in touch, check-in stopped` : `${name} answered for ${whose}, escalation stopped`;
+        store.addTimeline({ channel: "system", who: "Relay", text });
+      }
     },
 
     stageOf(personId) {
       return chains.get(personId)?.stage ?? null;
+    },
+
+    noteCallLive(personId) {
+      const own = chains.get(personId);
+      if (own && own.stage === "family") {
+        const name = store.getPerson(personId)?.name ?? personId;
+        if (!own.onCall) store.addTimeline({ channel: "system", who: "Relay", text: `${name} picked up the check-in call` });
+        own.onCall = true;
+        own.voicemail = false;
+        own.cancel();
+        own.cancel = () => {};
+        return true;
+      }
+      for (const [id, chain] of chains) {
+        if (store.getPerson(id)?.family_contact !== personId || chain.stage !== "responder" || chain.voicemail) continue;
+        const name = store.getPerson(personId)?.name ?? personId;
+        if (!chain.onCall) store.addTimeline({ channel: "system", who: "Relay", text: `${name} picked up the family call` });
+        chain.onCall = true;
+        chain.cancel();
+        chain.cancel = () => {};
+        return true;
+      }
+      return false;
+    },
+
+    notAnswered(personId) {
+      failCall(personId);
+    },
+
+    callEnded(personId) {
+      const own = chains.get(personId);
+      if (own && own.stage === "family" && own.onCall && !own.voicemail) return;
+      failCall(personId);
     },
 
     async confirm(personId, confirmedBy) {

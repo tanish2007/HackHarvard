@@ -26,7 +26,10 @@ export interface RelayDeps {
   /** Posts an event to Core. Never throws. */
   postEvent: (event: RelayEvent) => Promise<CoreResponse>;
   /** Live Find My locations for people who share with the line. Optional. */
-  findMy?: { latest(handle: string, timeoutMs?: number): Promise<Location | null> };
+  findMy?: {
+    latest(handle: string, timeoutMs?: number): Promise<Location | null>;
+    ask?(handle: string, timeoutMs?: number): Promise<Location | null>;
+  };
   /** Use Find My even for people in the scenario. Off by default. */
   findMyOverridesScenario?: boolean;
   /** Logger for actions this lane cannot carry out. Defaults to console.warn. */

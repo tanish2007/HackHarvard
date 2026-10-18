@@ -139,6 +139,10 @@ export const scenarioFileSchema = z.object({
   relay_lines: z.object({ messaging: phoneSchema, voice: phoneSchema }),
   zones: z.array(zoneSchema),
   fire_area: z.object({ lat: z.number(), lng: z.number(), radius_km: z.number().positive() }),
+  /** Other dummy fires drawn with the scenario fire. Defaults to none. */
+  extra_fires: z
+    .array(z.object({ id: z.string().min(1), lat: z.number(), lng: z.number(), radius_km: z.number().positive() }))
+    .default([]),
   places: z.array(placeSchema),
   fake_weather: fakeWeatherSchema,
   shelters: z.array(shelterSchema),

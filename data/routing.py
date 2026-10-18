@@ -12,9 +12,10 @@ from data.errors import DataSourceError
 from data.geo import detour_around, haversine_km
 
 EVAC_KMH = 40.0
+WALK_KMH = 5.0
 
 
-def fetch_route(from_lat, from_lng, to_lat, to_lng, fires, shelter_name):
+def fetch_route(from_lat, from_lng, to_lat, to_lng, fires, shelter_name, profile="driving", allow_geometric=True):
     """Ask OSRM for a road line, or use the geometric detour if it clips.
 
     Args:
@@ -24,6 +25,9 @@ def fetch_route(from_lat, from_lng, to_lat, to_lng, fires, shelter_name):
         to_lng (float): End longitude.
         fires (list[dict]): Fire hazards with lat, lng, radius_km, and id.
         shelter_name (str): Name used in the step text.
+        profile (str): OSRM profile, "driving" or "foot".
+        allow_geometric (bool): When False, keep the OSRM line even if it
+            enters a fire, instead of replacing it with a straight detour.
 
     Returns:
         dict: Route fields. source is osrm only when the road line is used.
@@ -34,14 +38,20 @@ def fetch_route(from_lat, from_lng, to_lat, to_lng, fires, shelter_name):
     start = {"lat": from_lat, "lng": from_lng}
     end = {"lat": to_lat, "lng": to_lng}
     via, avoided = via_points(start, end, fires)
-    payload = http.fetch_json(_osrm_url(via))
+    payload = http.fetch_json(_osrm_url(via, profile))
     road = polyline_from_osrm(payload)
-    if enters_any(road, fires):
+    if allow_geometric and enters_any(road, fires):
         return geometric_route(from_lat, from_lng, to_lat, to_lng, fires, shelter_name)
     route = payload["routes"][0]
+    distance_km = round(float(route["distance"]) / 1000.0, 2)
+    # The public foot profile reports a fast pace. Time a walk at 5 km/h.
+    if profile == "foot":
+        duration_min = round(distance_km / WALK_KMH * 60, 1)
+    else:
+        duration_min = round(float(route["duration"]) / 60.0, 1)
     return {
-        "distance_km": round(float(route["distance"]) / 1000.0, 2),
-        "duration_min": round(float(route["duration"]) / 60.0, 1),
+        "distance_km": distance_km,
+        "duration_min": duration_min,
         "steps": _osrm_steps(route, shelter_name),
         "polyline": road,
         "avoided_hazards": avoided,
@@ -166,18 +176,20 @@ def _closest(polyline, fire):
     return closest
 
 
-def _osrm_url(points):
-    """Build an OSRM driving URL.
+def _osrm_url(points, profile="driving"):
+    """Build an OSRM URL for a driving or walking line.
 
     Args:
         points (list[dict]): Ordered points with lat and lng.
+        profile (str): "driving" or "foot". Anything else stays driving.
 
     Returns:
         str: Request URL with a full GeoJSON overview.
     """
+    mode = profile if profile == "foot" else "driving"
     coords = ";".join(f"{point['lng']:.5f},{point['lat']:.5f}" for point in points)
     return (
-        "https://router.project-osrm.org/route/v1/driving/"
+        f"https://router.project-osrm.org/route/v1/{mode}/"
         f"{coords}?overview=full&geometries=geojson&steps=true"
     )
 

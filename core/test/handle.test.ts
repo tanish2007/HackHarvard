@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RelayAction, RelayEvent } from "../src/contracts.js";
 import { AGENT_TIMEOUT_MS, agentTimeoutMs, handleEvent, type Agent, type AgentContext } from "../src/event/handle.js";
 import type { IncidentStore } from "../src/state/store.js";
+import { createStubData } from "../src/data/stub.js";
 import { makeEvent, makeStore, PHONES, recordingDispatcher } from "./helpers.js";
 
 afterEach(() => {
@@ -357,6 +358,53 @@ describe("safe and leaving", () => {
     ]);
   });
 
+  it("tells a caller how to walk out from where they are", async () => {
+    const { store } = makeStore();
+    const { actions } = await handleEvent(makeEvent({ channel: "voice", text: "yes I'm okay" }), {
+      store,
+      data: createStubData(store.scenario),
+    });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ type: "say" });
+    const text = actions[0].type === "say" ? actions[0].text : "";
+    expect(text.startsWith("Thanks, Amit. I've marked you safe.")).toBe(true);
+    expect(text).toContain("Walk to Hemenway Gym");
+  });
+
+  it("says the move was right when they walked toward the shelter", async () => {
+    const { store } = makeStore();
+    const data = createStubData(store.scenario);
+    const north = async () => [{ type: "say" as const, text: "Move north." }];
+    await handleEvent(makeEvent({ channel: "voice", text: "where should I go" }), { store, data, agent: north });
+    store.recordContact("p_amit", { lat: 42.376, lng: -71.118 });
+    const { actions } = await handleEvent(makeEvent({ channel: "voice", text: "I kept walking" }), { store, data, agent: north });
+    const text = actions[0]?.type === "say" ? actions[0].text : "";
+    expect(text.toLowerCase()).toContain("right way");
+    expect(text.toLowerCase().startsWith("move north")).toBe(false);
+  });
+
+  it("says the move was wrong when they walked away from the shelter", async () => {
+    const { store } = makeStore();
+    const data = createStubData(store.scenario);
+    const north = async () => [{ type: "say" as const, text: "Move north." }];
+    await handleEvent(makeEvent({ channel: "voice", text: "where should I go" }), { store, data, agent: north });
+    store.recordContact("p_amit", { lat: 42.37, lng: -71.1175 });
+    const { actions } = await handleEvent(makeEvent({ channel: "voice", text: "I kept walking" }), { store, data, agent: north });
+    const text = actions[0]?.type === "say" ? actions[0].text : "";
+    expect(text.toLowerCase()).toContain("wrong way");
+    expect(text.toLowerCase()).toContain("south");
+  });
+
+  it("adds the walk when a phone reply does not already name the shelter", async () => {
+    const { store } = makeStore();
+    const { actions } = await handleEvent(makeEvent({ channel: "voice", text: "where should I go" }), {
+      store,
+      data: createStubData(store.scenario),
+      agent: async () => [{ type: "say", text: "Stay calm." }],
+    });
+    expect(actions[0]).toMatchObject({ type: "say", text: expect.stringContaining("Stay calm. Walk to Hemenway Gym") });
+  });
+
   it.each(["I'm safe", "leaving now"])("holds sos when they say %j", async (text) => {
     const { store } = makeStore();
     await send(store, { text: "SOS" });
@@ -512,6 +560,15 @@ describe("radio", () => {
 });
 
 describe("location only", () => {
+  it("stores a repeated location without thanking them again", async () => {
+    const { store } = makeStore();
+    await send(store, { text: "", location: { lat: 37.9, lng: -122.3 } });
+    const again = await send(store, { text: "", location: { lat: 37.900001, lng: -122.3 } });
+    expect(again).toEqual([]);
+    expect(rows(store).filter((row) => row[2] === "[shared location]")).toHaveLength(1);
+    expect(store.getPerson("p_amit")).toMatchObject({ lat: 37.900001, lng: -122.3 });
+  });
+
   it("thanks a known person and updates their location", async () => {
     const { store } = makeStore();
     const [action] = await send(store, { text: "", location: { lat: 37.9, lng: -122.3 } });
