@@ -1,2 +1,15 @@
 prd.md
 claude.md
+
+# Dependencies and build output
+node_modules/
+dist/
+*.log
+
+# Secrets: API keys and Photon credentials
+.env
+.env.*
+!.env.example
+
+# Real phone numbers for demo personas and Relay's own lines
+scenario.local.json
