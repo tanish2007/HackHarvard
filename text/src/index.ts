@@ -4,6 +4,8 @@ import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 import { createActionsServer } from "./actionsServer.js";
 import { postEvent } from "./coreClient.js";
+import { FindMyTracker } from "./findmy.js";
+import { openPhotonLocationSource } from "./findmyPhoton.js";
 import { LOCATION_HINT } from "./handler.js";
 import { interpretContent, type IncomingContent } from "./incoming.js";
 import { loadDirectory, normalizePhone } from "./people.js";
@@ -20,6 +22,18 @@ const deps: RelayDeps = {
   postEvent: (event) => postEvent(event, { coreUrl }),
 };
 console.log(`[text] sending events to ${coreUrl}`);
+
+// Live Find My locations, for people who share with the line. Set FINDMY=0 to
+// turn it off. Scenario people keep their scenario location unless
+// FINDMY_OVERRIDE=1, so the demo's fire and map stay consistent.
+if (process.env.FINDMY !== "0") {
+  const tracker = new FindMyTracker({
+    open: () => openPhotonLocationSource(process.env.PROJECT_ID!, process.env.PROJECT_SECRET!),
+  });
+  tracker.start();
+  deps.findMy = tracker;
+  deps.findMyOverridesScenario = process.env.FINDMY_OVERRIDE === "1";
+}
 
 // Spectrum bridges a single agent loop to many messaging interfaces.
 // Each provider in `providers` adds an interface (terminal TUI, iMessage, …).
