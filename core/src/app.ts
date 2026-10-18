@@ -26,7 +26,8 @@ import type { IncidentStore } from "./state/store.js";
  *     agent (Agent | undefined): The LLM agent. Without it, only the keyword
  *         rules answer.
  *     dispatcher (Dispatcher | undefined): Pushes actions Core starts on its
- *         own to Text and Voice. Used by alerts, timers, and admin routes.
+ *         own to Text and Voice. Used by alerts, timers, admin routes, and
+ *         /event for actions meant for someone other than the sender.
  *     watcher (HazardWatcher | undefined): Sends fire alerts. Without it,
  *         POST /admin/alert answers 503.
  *     escalation (EscalationEngine | undefined): Runs check-in chains and the
@@ -143,7 +144,9 @@ export function createCoreRouter(deps: CoreDeps): Router {
         res.status(400).json({ error: "invalid_event", issues: parsed.issues });
         return;
       }
-      res.json(await handleEvent(parsed.event, { store: deps.store, agent: deps.agent, escalation: deps.escalation }));
+      res.json(
+        await handleEvent(parsed.event, { store: deps.store, agent: deps.agent, escalation: deps.escalation, dispatcher: deps.dispatcher }),
+      );
     }),
   );
 

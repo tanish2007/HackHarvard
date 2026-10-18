@@ -6,6 +6,7 @@
  * anything itself. It only returns actions for the channels to carry out.
  */
 import type { CoreResponse, RelayAction, RelayEvent } from "../contracts.js";
+import type { Dispatcher } from "../dispatch/outbound.js";
 import { detectLanguage } from "../lang/detect.js";
 import { resolveLang } from "../lang/languages.js";
 import { handleKey } from "../lib/phone.js";
@@ -54,11 +55,17 @@ export type Agent = (ctx: AgentContext) => Promise<RelayAction[]>;
  *     escalation ({ contactReceived(personId: string): void } | undefined):
  *         Told whenever a person gets in touch, so their check-in chain
  *         stops. Without it, no chains run.
+ *     dispatcher (Pick<Dispatcher, "push"> | undefined): Pushes actions
+ *         for anyone other than the sender, e.g. the family text after an
+ *         SOS, straight to the lane that carries them out. A channel only
+ *         answers the person it is talking to, so those actions would be
+ *         lost in the reply. Without it, they stay in the reply.
  */
 export interface HandlerDeps {
   store: IncidentStore;
   agent?: Agent;
   escalation?: { contactReceived(personId: string): void };
+  dispatcher?: Pick<Dispatcher, "push">;
 }
 
 /** Who sent an event, after looking them up. */
@@ -107,9 +114,17 @@ export async function handleEvent(event: RelayEvent, deps: HandlerDeps): Promise
 
   const work = (async () => {
     const sender = resolveSender(event, deps);
-    const response = { actions: await route(event, sender, deps) };
+    const actions = await route(event, sender, deps);
+    logActions(deps.store, event, actions, sender);
+    const senderId = sender.person?.person_id ?? sender.unit?.unit_id;
+    const forOthers = deps.dispatcher ? actions.filter((a) => a.type !== "say" && a.person_id !== senderId) : [];
+    const response = { actions: actions.filter((a) => !forOthers.includes(a)) };
+    // Remembered before the push, so a redelivered event never pushes twice.
     deps.store.rememberResponse(key, response);
-    logActions(deps.store, event, response.actions, sender);
+    if (forOthers.length > 0) {
+      // Not awaited: the sender's reply must not wait on another lane.
+      deps.dispatcher!.push(forOthers).catch((err) => console.error(`[core] push failed for ${event.event_id}:`, err));
+    }
     return response;
   })();
   pending.set(key, work);
