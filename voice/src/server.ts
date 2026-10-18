@@ -57,6 +57,10 @@ app.use(
     secret: need("VOICE_LLM_SECRET"),
     coreUrl,
     placer,
+    // Core's agent can take several seconds when the model is slow. Wait for
+    // it, and say "One moment" on the call meanwhile. Keep this above Core's
+    // AGENT_TIMEOUT_MS so Voice does not give up first.
+    coreTimeoutMs: Number(process.env.VOICE_CORE_TIMEOUT_MS) || 12000,
   }),
 );
 app.use(actionsErrorHandler);
