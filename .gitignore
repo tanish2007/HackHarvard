@@ -1,5 +1,15 @@
 prd.md
 claude.md
-node_modules
-dist
+
+# Dependencies and build output (any folder, including voice/)
+node_modules/
+dist/
+*.log
+
+# Secrets: API keys and Photon credentials
 .env
+.env.*
+!.env.example
+
+# Real phone numbers for demo personas and Relay's own lines
+scenario.local.json
