@@ -343,6 +343,28 @@ export class IncidentStore {
   }
 
   /**
+   * Change the language Relay talks to a person in.
+   *
+   * Used when someone texts in another language, so their next replies,
+   * family alerts, and the agent switch to it.
+   *
+   * Args:
+   *     personId (string): Who to update.
+   *     language (string): The new language code, e.g. "es".
+   *
+   * Returns:
+   *     boolean: True if it changed. False if it was already that language
+   *         or the person is unknown.
+   */
+  setLanguage(personId: string, language: string): boolean {
+    const p = this.people.get(personId);
+    if (!p || p.language === language) return false;
+    p.language = language;
+    this.touch();
+    return true;
+  }
+
+  /**
    * Change a person's status.
    *
    * An SOS is never cleared automatically. Only a responder can clear it, so
