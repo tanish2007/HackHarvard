@@ -118,12 +118,44 @@ describe("addPerson", () => {
     expect(store.findPersonByHandle("617-555-0150")?.person_id).toBe("p_new_1");
   });
 
-  it("keeps a new person off /state until they share a location", () => {
+  it("keeps a new person off the map until they share a location, but counts them", () => {
     const { store } = makeStore();
     store.addPerson(PHONES.stranger, null);
     const s = store.snapshot();
     expect(s.people.some((p) => p.person_id === "p_new_1")).toBe(false);
-    expect(s.counts.unconfirmed).toBe(5);
+    expect(s.counts.unconfirmed).toBe(6);
+  });
+
+  it("counts an SOS from someone with no location", () => {
+    const { store } = makeStore();
+    store.addPerson(PHONES.stranger, null);
+    store.setStatus("p_new_1", "sos");
+    const s = store.snapshot();
+    expect(s.counts.sos).toBe(1);
+    expect(s.people.some((p) => p.status === "sos")).toBe(false);
+  });
+
+  it("uses the channel's person_id when it is free", () => {
+    const { store } = makeStore();
+    expect(store.addPerson(PHONES.stranger, null, "p_0150").person_id).toBe("p_0150");
+    expect(store.addPerson(PHONES.stranger2, null).person_id).toBe("p_new_2");
+  });
+
+  it.each(["p_amit", "u_4", "sim_001"])("does not take a preferred id %s that is already used", (id) => {
+    const { store } = makeStore();
+    expect(store.addPerson(PHONES.stranger, null, id).person_id).toBe("p_new_1");
+  });
+
+  it("does not take a preferred id held by someone who opted out", () => {
+    const { store } = makeStore();
+    store.removePerson("p_amit");
+    expect(store.addPerson(PHONES.stranger, null, "p_amit").person_id).toBe("p_new_1");
+  });
+
+  it("stores a short code as it was sent, trimmed and lowercased", () => {
+    const { store } = makeStore();
+    expect(store.addPerson(" RELAY1 ", null).handle).toBe("relay1");
+    expect(store.findPersonByHandle("relay1")?.person_id).toBe("p_new_1");
   });
 
   it("puts a new person with a location on /state and in the counts", () => {
@@ -174,6 +206,70 @@ describe("removePerson", () => {
     store.removePerson("p_amit");
     store.reset();
     expect(store.getPerson("p_amit")?.name).toBe("Amit");
+    expect(store.restoreByHandle(PHONES.amit)).toBeUndefined();
+  });
+});
+
+describe("restoreByHandle", () => {
+  it("brings back an opted-out person with everything but their status", () => {
+    const { store } = makeStore();
+    const before = store.getPerson("p_amit")!;
+    store.setStatus("p_amit", "safe");
+    store.removePerson("p_amit");
+    const restored = store.restoreByHandle("(617) 555-0101");
+    expect(restored).toEqual({ ...before, status: "unconfirmed" });
+    expect(store.getPerson("p_amit")).toEqual(restored);
+    expect(store.snapshot().people.some((p) => p.person_id === "p_amit")).toBe(true);
+  });
+
+  it("keeps sos", () => {
+    const { store } = makeStore();
+    store.setStatus("p_amit", "sos");
+    store.removePerson("p_amit");
+    expect(store.restoreByHandle(PHONES.amit)?.status).toBe("sos");
+  });
+
+  it("only restores once", () => {
+    const { store } = makeStore();
+    store.removePerson("p_amit");
+    store.restoreByHandle(PHONES.amit);
+    expect(store.restoreByHandle(PHONES.amit)).toBeUndefined();
+  });
+
+  it.each([PHONES.stranger, PHONES.priya, "", "  "])("returns undefined for %j, who did not opt out", (handle) => {
+    const { store } = makeStore();
+    store.removePerson("p_amit");
+    expect(store.restoreByHandle(handle)).toBeUndefined();
+  });
+
+  it("returns a copy", () => {
+    const { store } = makeStore();
+    store.removePerson("p_amit");
+    store.restoreByHandle(PHONES.amit)!.name = "changed";
+    expect(store.getPerson("p_amit")?.name).toBe("Amit");
+  });
+});
+
+describe("listPeople", () => {
+  it("lists everyone tracked in scenario order, with no location filter", () => {
+    const { store } = makeStore();
+    store.addPerson(PHONES.stranger, null);
+    const ids = store.listPeople().map((p) => p.person_id);
+    expect(ids.slice(0, 3)).toEqual(["p_amit", "p_priya", "v_sam"]);
+    expect(ids).toHaveLength(52);
+    expect(ids.at(-1)).toBe("p_new_1");
+  });
+
+  it("leaves out people who opted out", () => {
+    const { store } = makeStore();
+    store.removePerson("p_amit");
+    expect(store.listPeople().some((p) => p.person_id === "p_amit")).toBe(false);
+  });
+
+  it("returns copies", () => {
+    const { store } = makeStore();
+    store.listPeople()[0].status = "sos";
+    expect(store.getPerson("p_amit")?.status).toBe("unconfirmed");
   });
 });
 

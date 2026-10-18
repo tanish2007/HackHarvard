@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RelayAction, RelayEvent } from "../src/contracts.js";
-import { handleEvent, type Agent, type AgentContext } from "../src/event/handle.js";
+import { AGENT_TIMEOUT_MS, handleEvent, type Agent, type AgentContext } from "../src/event/handle.js";
 import type { IncidentStore } from "../src/state/store.js";
 import { makeEvent, makeStore, PHONES } from "./helpers.js";
 
@@ -167,6 +167,34 @@ describe("sign-up", () => {
     expect(store.getPerson("p_new_2")).toBeUndefined();
   });
 
+  it("signs up a sender with a non-phone handle, like a short code, only once", async () => {
+    const { store } = makeStore();
+    await send(store, { from: "12345", text: "hi" });
+    await send(store, { from: " 12345 ", text: "hi again" });
+    expect(store.getPerson("p_new_1")?.handle).toBe("12345");
+    expect(store.getPerson("p_new_2")).toBeUndefined();
+  });
+
+  it("keeps the person_id the channel made up, when it is free", async () => {
+    const { store } = makeStore();
+    const [action] = await send(store, { from: PHONES.stranger, person_id: "p_0150", text: "hi" });
+    expect(action).toMatchObject({ person_id: "p_0150", to: PHONES.stranger });
+    expect(store.getPerson("p_0150")?.handle).toBe(PHONES.stranger);
+  });
+
+  it("ignores a channel person_id that a unit already uses", async () => {
+    const { store } = makeStore();
+    await send(store, { from: PHONES.stranger, person_id: "u_4", text: "hi" });
+    expect(store.findPersonByHandle(PHONES.stranger)?.person_id).toBe("p_new_1");
+  });
+
+  it("ignores a channel person_id that an opted-out person holds", async () => {
+    const { store } = makeStore();
+    await send(store, { text: "STOP" });
+    await send(store, { from: PHONES.stranger, person_id: "p_amit", text: "hi" });
+    expect(store.findPersonByHandle(PHONES.stranger)?.person_id).toBe("p_new_1");
+  });
+
   it("does not sign up an unknown texter who sends STOP", async () => {
     const { store } = makeStore();
     expect(await send(store, { from: PHONES.stranger, text: "STOP" })).toEqual([]);
@@ -242,6 +270,28 @@ describe("SOS", () => {
     const { store } = makeStore();
     await send(store, { from: PHONES.stranger, text: "hi" });
     expect(await send(store, { from: PHONES.stranger, text: "SOS" })).toHaveLength(1);
+  });
+
+  it("answers a unit that texts SOS by text, not with say", async () => {
+    const { store } = makeStore();
+    const actions = await send(store, { from: PHONES.unit4, text: "SOS, firefighter injured" });
+    expect(actions).toEqual([
+      { type: "send_text", person_id: "u_4", to: PHONES.unit4, text: "Relay got your SOS. Responders are being alerted now.", map_url: null },
+    ]);
+    expect(rows(store)).toContainEqual(["system", "Relay", "SOS from Unit 4, needs human review"]);
+  });
+
+  it("asks a person with no location to share it after an SOS", async () => {
+    const { store } = makeStore();
+    const [action] = await send(store, { from: PHONES.stranger, text: "SOS" });
+    expect(action.type === "send_text" && action.text).toContain("share your location");
+    expect(store.snapshot().counts.sos).toBe(1);
+  });
+
+  it("does not ask for a location it already has", async () => {
+    const { store } = makeStore();
+    const [action] = await send(store, { text: "SOS" });
+    expect(action.type === "send_text" && action.text).not.toContain("share your location");
   });
 
   it("logs an SOS from an unknown caller for review, without their number", async () => {
@@ -341,11 +391,47 @@ describe("STOP", () => {
     expect(await send(store, { from: PHONES.unit4, text: "STOP" })).toEqual([]);
   });
 
-  it("signs them up as new if they text again", async () => {
+  it("restores them with the same id, name, and family contact if they text again", async () => {
     const { store } = makeStore();
     await send(store, { text: "STOP" });
-    const [action] = await send(store, { text: "hi again" });
-    expect(action).toMatchObject({ person_id: "p_new_1", to: PHONES.amit });
+    const actions = await send(store, { text: "hi again" });
+    expect(actions).toEqual([
+      { type: "send_text", person_id: "p_amit", to: PHONES.amit, text: expect.stringMatching(/^Welcome back, Amit\./), map_url: null },
+    ]);
+    expect(store.getPerson("p_amit")).toMatchObject({ name: "Amit", family_contact: "p_priya", household_id: "h_patel", status: "unconfirmed" });
+    expect(store.getPerson("p_new_1")).toBeUndefined();
+    expect(rows(store)).toContainEqual(["system", "Relay", "Amit signed up again after STOP"]);
+  });
+
+  it("restores someone who was safe as unconfirmed", async () => {
+    const { store } = makeStore();
+    await send(store, { text: "I'm safe" });
+    await send(store, { text: "STOP" });
+    await send(store, { text: "hello" });
+    expect(store.getPerson("p_amit")?.status).toBe("unconfirmed");
+  });
+
+  it("keeps an SOS through STOP and rejoining", async () => {
+    const { store } = makeStore();
+    await send(store, { text: "SOS" });
+    await send(store, { text: "STOP" });
+    await send(store, { text: "hello" });
+    expect(store.getPerson("p_amit")?.status).toBe("sos");
+    expect(store.snapshot().counts.sos).toBe(1);
+  });
+
+  it("handles the first message after rejoining by its own rule", async () => {
+    const { store } = makeStore();
+    await send(store, { text: "STOP" });
+    await send(store, { text: "I'm safe" });
+    expect(store.getPerson("p_amit")?.status).toBe("safe");
+  });
+
+  it("restores only on text, not on a voice call", async () => {
+    const { store } = makeStore();
+    await send(store, { text: "STOP" });
+    await send(store, { channel: "voice", text: "hello?" });
+    expect(store.getPerson("p_amit")).toBeUndefined();
   });
 });
 
@@ -475,9 +561,75 @@ describe("agent", () => {
     expect("text" in action && action.text).toContain(fallback);
   });
 
+  it("passes a live, not yet aborted signal", async () => {
+    const { store } = makeStore();
+    let signal: AbortSignal | undefined;
+    await send(store, { text: "where is the fire?" }, async (ctx) => {
+      signal = ctx.signal;
+      return [{ type: "say", text: "west of you" }];
+    });
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(false);
+  });
+
   it("returns an empty list if the agent returns one", async () => {
     const { store } = makeStore();
     expect(await send(store, { text: "thanks" }, async () => [])).toEqual([]);
+  });
+});
+
+describe("agent time limit", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * An agent that never answers on its own, and records its signal.
+   *
+   * Returns:
+   *     { agent: Agent, signals: AbortSignal[] }: The agent and the signals it got.
+   */
+  function hangingAgent() {
+    const signals: AbortSignal[] = [];
+    const agent: Agent = (ctx) => {
+      signals.push(ctx.signal);
+      return new Promise(() => {});
+    };
+    return { agent, signals };
+  }
+
+  it("is 3.2 seconds, under Voice's 4 second limit", () => {
+    expect(AGENT_TIMEOUT_MS).toBe(3200);
+  });
+
+  it("aborts the agent and replies with the fallback once the limit passes", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { store } = makeStore();
+    const { agent, signals } = hangingAgent();
+    const pending = send(store, { channel: "radio", from: PHONES.unit4, text: "Relay, wind forecast?" }, agent);
+    await vi.advanceTimersByTimeAsync(AGENT_TIMEOUT_MS - 1);
+    expect(signals[0].aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toEqual([{ type: "say", text: "Relay copies. I can't answer that right now. Stand by." }]);
+    expect(signals[0].aborted).toBe(true);
+  });
+
+  it("uses the agent's answer if it arrives just in time", async () => {
+    vi.useFakeTimers();
+    const { store } = makeStore();
+    const agent: Agent = () =>
+      new Promise((resolve) => setTimeout(() => resolve([{ type: "say", text: "just in time" }]), AGENT_TIMEOUT_MS - 1));
+    const pending = send(store, { channel: "voice", text: "where is the fire?" }, agent);
+    await vi.advanceTimersByTimeAsync(AGENT_TIMEOUT_MS);
+    expect(await pending).toEqual([{ type: "say", text: "just in time" }]);
+  });
+
+  it("leaves no timer running after a fast answer", async () => {
+    vi.useFakeTimers();
+    const { store } = makeStore();
+    await send(store, { text: "where is the fire?" }, async () => [{ type: "say", text: "fast" }]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
@@ -500,6 +652,57 @@ describe("duplicates", () => {
     await handleEvent(event, { store });
     await handleEvent(event, { store });
     expect(rows(store).filter((r) => r[2].startsWith("To Priya"))).toHaveLength(1);
+  });
+
+  it("runs a duplicate once even when both copies arrive while the agent is thinking", async () => {
+    const { store } = makeStore();
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const agent: Agent = async () => {
+      calls++;
+      await gate;
+      return [{ type: "say", text: "answer" }];
+    };
+    const event = makeEvent({ text: "what is the wind like?" });
+    const both = Promise.all([handleEvent(event, { store, agent }), handleEvent(event, { store, agent })]);
+    release();
+    const [a, b] = await both;
+    expect(calls).toBe(1);
+    expect(b).toEqual(a);
+    expect(rows(store).filter((r) => r[1] === "Amit")).toHaveLength(1);
+  });
+
+  it("gives each waiting copy its own copy of the response", async () => {
+    const { store } = makeStore();
+    const event = makeEvent({ text: "where is the fire?" });
+    const [a, b] = await Promise.all([handleEvent(event, { store }), handleEvent(event, { store })]);
+    a.actions.length = 0;
+    expect(b.actions).toHaveLength(1);
+    expect((await handleEvent(event, { store })).actions).toHaveLength(1);
+  });
+
+  it("treats the same event_id on a different channel as a new event", async () => {
+    const { store } = makeStore();
+    await handleEvent(makeEvent({ event_id: "evt_1", text: "hi" }), { store });
+    await handleEvent(makeEvent({ event_id: "evt_1", channel: "voice", text: "hi" }), { store });
+    expect(rows(store).filter((r) => r[1] === "Amit").map((r) => r[0])).toEqual(["imessage", "voice"]);
+  });
+
+  it("remembers the fallback after an agent failure, so a redelivery does not retry the agent", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { store } = makeStore();
+    let calls = 0;
+    const agent: Agent = async () => {
+      calls++;
+      if (calls === 1) throw new Error("first try failed");
+      return [{ type: "say", text: "ok" }];
+    };
+    const event = makeEvent({ text: "where is the fire?" });
+    const first = await handleEvent(event, { store, agent });
+    const second = await handleEvent(event, { store, agent });
+    expect(second).toEqual(first);
+    expect(calls).toBe(1);
   });
 
   it("handles two events with the same text but different ids", async () => {

@@ -100,9 +100,6 @@ describe("safe", () => {
     "Im good",
     "we're okay",
     "we are safe now",
-    "ok",
-    "Yes",
-    "yep",
     "all good here",
     "at the shelter",
     "We're at shelter C",
@@ -117,8 +114,70 @@ describe("safe", () => {
     expect(intent(text)).not.toBe("safe");
   });
 
+  it.each(["ok", "Okay", "Yes", "yeah", "yep", "fine"])("%j by text goes to the agent, since it could mean anything", (text) => {
+    expect(intent(text)).toBe("agent");
+  });
+
+  it.each(["ok", "Okay", "Yes", "yeah", "yep", "fine", "yes I am", "I'm fine", "Yes."])(
+    "%j on a voice call is safe, since the check-in call asks 'Are you safe?'",
+    (text) => {
+      expect(intent(text, "voice")).toBe("safe");
+    },
+  );
+
+  it.each(["no", "nope", "not really"])("%j on a voice call is not safe", (text) => {
+    expect(intent(text, "voice")).not.toBe("safe");
+  });
+
   it("checks safe before en route", () => {
     expect(intent("made it, leaving the car here")).toBe("safe");
+  });
+});
+
+describe("negation and questions", () => {
+  // A false SOS cannot be cleared without a responder and texts the family.
+  // A false safe stops the check-in chain for someone who may be in danger.
+  const cases: [string, string][] = [
+    ["We're safe, nobody is hurt", "safe"],
+    ["I'm ok, not injured", "safe"],
+    ["No emergency here, we're fine", "safe"],
+    ["no one is hurt", "agent"],
+    ["Can you help me find a shelter?", "agent"],
+    ["No necesito ayuda", "agent"],
+    ["Is Route 24 safe?", "agent"],
+    ["Is the shelter safe for pets?", "agent"],
+    ["am I safe here", "agent"],
+    ["We are not leaving", "agent"],
+    ["not leaving yet", "agent"],
+  ];
+
+  it.each(cases)("%j is %s", (text, expected) => {
+    expect(intent(text)).toBe(expected);
+  });
+
+  it("only looks 3 words back for a negator", () => {
+    expect(intent("not that I know, but my son is hurt")).toBe("sos");
+    expect(intent("there is no road out and my son is hurt")).toBe("sos");
+  });
+
+  it("does not carry a negation across a clause boundary", () => {
+    expect(intent("No. I'm trapped")).toBe("sos");
+    expect(intent("not good, we're trapped")).toBe("sos");
+    expect(intent("No! Help me")).toBe("sos");
+  });
+
+  it("still finds SOS in a later statement after a question", () => {
+    expect(intent("Is anyone there? We're trapped")).toBe("sos");
+    expect(intent("Where do we go? I'm injured")).toBe("sos");
+  });
+
+  it("counts the word SOS even inside a question", () => {
+    expect(intent("SOS can anyone hear me?")).toBe("sos");
+    expect(intent("can you send an SOS for us?")).toBe("sos");
+  });
+
+  it("does not count a negated SOS", () => {
+    expect(intent("not an SOS, just checking the route")).not.toBe("sos");
   });
 });
 
@@ -193,6 +252,17 @@ describe("radio", () => {
 
   it("handles the wake phrase on its own", () => {
     expect(classify("Relay", "radio", "relay")).toEqual({ intent: "agent", text: "" });
+  });
+
+  it("matches a wake phrase of more than one word", () => {
+    expect(classify("Hey Relay, wind forecast?", "radio", "hey relay")).toEqual({ intent: "agent", text: "wind forecast?" });
+    expect(classify("Unit 4, hey relay: status", "radio", "hey relay").text).toBe("status");
+    expect(classify("Relay, wind forecast?", "radio", "hey relay").intent).toBe("radio_chatter");
+    expect(classify("hey there relay", "radio", "hey relay").intent).toBe("radio_chatter");
+  });
+
+  it("never wakes on a blank wake phrase", () => {
+    expect(classify("anything at all", "radio", "  ").intent).toBe("radio_chatter");
   });
 
   it("uses the scenario's wake phrase, not a hardcoded one", () => {
