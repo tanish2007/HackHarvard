@@ -34,6 +34,7 @@
  *       languages that need one.
  */
 import { resolveLang, type Lang } from "../lang/languages.js";
+import type { EscapeInfo } from "../lib/geo.js";
 
 /** Ways Relay can be talking to someone. Voice and radio are spoken. */
 export type Medium = "text" | "spoken";
@@ -228,6 +229,13 @@ export const TEMPLATES = {
     zh: "这里是 Relay，刚才给您发短信通知{incident}的服务。您现在安全吗？如果安全，请说“是”；如果需要帮助，请说“救命”。",
     gu: "આ Relay છે, જેણે હમણાં જ તમને {incident} વિશે મેસેજ કર્યો હતો. શું તમે અત્યારે સુરક્ષિત છો? સુરક્ષિત હો તો 'હા' બોલો, અથવા મદદ જોઈએ તો 'મદદ' બોલો.",
     hi: "यह Relay है, जिसने अभी आपको {incident} के बारे में मैसेज किया था। क्या आप अभी सुरक्षित हैं? सुरक्षित हों तो 'हाँ' बोलिए, या मदद चाहिए तो 'मदद' बोलिए।",
+  },
+  checkinCallFire: {
+    en: "This is Relay, about the {incident}: {where}. To get away from the fire, head {away}. Are you safe right now? Say yes if you are safe, or help if you need help.",
+    es: "Le habla Relay, sobre el {incident}: {where}. Para alejarse del fuego, vaya hacia el {away}. ¿Está a salvo ahora mismo? Diga «sí» si está a salvo, o «ayuda» si necesita ayuda.",
+    zh: "这里是 Relay，关于{incident}：{where}。要远离火场，请往{away}方向走。您现在安全吗？如果安全，请说“是”；如果需要帮助，请说“救命”。",
+    gu: "આ Relay છે, {incident} વિશે: {where}. આગથી દૂર જવા માટે {away} દિશામાં જાઓ. શું તમે અત્યારે સુરક્ષિત છો? સુરક્ષિત હો તો 'હા' બોલો, અથવા મદદ જોઈએ તો 'મદદ' બોલો.",
+    hi: "यह Relay है, {incident} के बारे में: {where}। आग से दूर जाने के लिए {away} दिशा में जाइए। क्या आप अभी सुरक्षित हैं? सुरक्षित हों तो 'हाँ' बोलिए, या मदद चाहिए तो 'मदद' बोलिए।",
   },
   familyCall: {
     en: "This is Relay, calling about the {incident}. We sent {name} a fire alert and called them, but could not reach them. If you can, please try to reach {name} and ask them to text Relay back. Responders are being told. Are you safe yourself? Say yes if you are safe, or help if you need help.",
@@ -516,15 +524,24 @@ export const replies = {
    * It asks "Are you safe" on purpose: a bare "yes" on a call counts as safe
    * in the fast rules, so the question has to make "yes" mean safe.
    *
+   * When Relay knows where they are and where the fire is, it first says
+   * how far and which way the fire is, and which compass direction leads
+   * directly away from it, so they can move before the question.
+   *
    * Args:
    *     incident (string): Incident name.
    *     lang (string): Their language. Defaults to English.
+   *     fire (EscapeInfo | undefined): The nearest fire relative to them.
    *
    * Returns:
    *     string: The spoken script.
    */
-  checkinCall(incident: string, lang = "en"): string {
-    return render("checkinCall", lang, { incident });
+  checkinCall(incident: string, lang = "en", fire?: EscapeInfo): string {
+    if (!fire) return render("checkinCall", lang, { incident });
+    const where = fire.inside
+      ? render("fireWhereInside", lang, {})
+      : render("fireWhereOutside", lang, { km: km(fire.fireKm), direction: direction(fire.direction, lang) });
+    return render("checkinCallFire", lang, { incident, where, away: direction(fire.away, lang) });
   },
 
   /**

@@ -45,3 +45,50 @@ export function compassDirection(aLat: number, aLng: number, bLat: number, bLng:
   const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
   return COMPASS[Math.round(bearing / 45) % 8];
 }
+
+/**
+ * Where the nearest fire is from someone, and which way leads away from it.
+ *
+ * Attributes:
+ *     fireKm (number): Distance from them to the fire's edge, in km. 0 inside it.
+ *     direction (string): Compass word from them to the fire, e.g. "northeast".
+ *     away (string): Compass word pointing directly away from the fire's
+ *         centre, e.g. "southwest".
+ *     inside (boolean): True if they are inside the fire circle.
+ */
+export interface EscapeInfo {
+  fireKm: number;
+  direction: string;
+  away: string;
+  inside: boolean;
+}
+
+/**
+ * Find the nearest fire to a point and the direction that escapes it.
+ *
+ * "Away" is the bearing from the fire's centre to the person, so moving
+ * that way always increases the distance from the fire.
+ *
+ * Args:
+ *     lat (number): The person's latitude.
+ *     lng (number): The person's longitude.
+ *     fires ({ lat: number, lng: number, radius_km: number }[]): Fire circles.
+ *
+ * Returns:
+ *     EscapeInfo | null: The nearest fire by edge distance, or null if there
+ *         are no fires.
+ */
+export function escapeFrom(lat: number, lng: number, fires: { lat: number; lng: number; radius_km: number }[]): EscapeInfo | null {
+  let best: { fire: (typeof fires)[number]; edge: number } | null = null;
+  for (const fire of fires) {
+    const edge = distanceKm(lat, lng, fire.lat, fire.lng) - fire.radius_km;
+    if (!best || edge < best.edge) best = { fire, edge };
+  }
+  if (!best) return null;
+  return {
+    fireKm: Math.max(0, Math.round(best.edge * 100) / 100),
+    direction: compassDirection(lat, lng, best.fire.lat, best.fire.lng),
+    away: compassDirection(best.fire.lat, best.fire.lng, lat, lng),
+    inside: best.edge <= 0,
+  };
+}

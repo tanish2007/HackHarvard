@@ -128,7 +128,7 @@ export const TOOLS: Tool[] = [
     declaration: {
       name: "get_hazards",
       description:
-        "Active fires and weather hazards near a place: kind, severity, distance, and direction. Use for questions about where the fire is or whether an area is dangerous.",
+        "Active fires and weather hazards near a place: kind, severity, distance, direction, and the compass direction that leads directly away. Use for questions about where the fire is, which way to go, or whether an area is dangerous.",
       parameters: { type: "object", properties: nearArg },
     },
     async run(args, ctx) {
@@ -142,6 +142,7 @@ export const TOOLS: Tool[] = [
           severity: h.severity,
           distance_km: distanceKm(at.lat, at.lng, h.lat, h.lng),
           direction: compassDirection(at.lat, at.lng, h.lat, h.lng),
+          move_away_toward: compassDirection(h.lat, h.lng, at.lat, at.lng),
           radius_km: h.radius_km,
           source: h.source,
         })),
