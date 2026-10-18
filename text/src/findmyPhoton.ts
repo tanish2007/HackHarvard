@@ -74,18 +74,27 @@ export async function openPhotonLocationSource(
     },
   });
 
+  let closing = false;
+
   return {
     async *watch(): AsyncGenerator<LocationUpdate> {
-      for await (const update of client.locations.watch()) yield toUpdate(update.location);
+      try {
+        for await (const update of client.locations.watch()) yield toUpdate(update.location);
+      } catch (err) {
+        // Closing the connection on purpose ends the feed with an error. That is not a failure.
+        if (!closing) throw err;
+      }
     },
     async get(handle) {
       try {
         return toUpdate(await client.locations.get(handle));
       } catch {
+        // Not sharing with the line, or the lookup failed. Either way, no location.
         return null;
       }
     },
     async close() {
+      closing = true;
       await client.close();
     },
   };
