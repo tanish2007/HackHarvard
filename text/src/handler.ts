@@ -23,9 +23,10 @@ export const ACKNOWLEDGED = "Relay got your message.";
  * @param registry - Who has opted in so far.
  * @param phone - The sender's phone number in E.164 format.
  * @param text - The message text.
- * @returns The reply to send back to the sender.
+ * @returns The reply to send back to the sender, or null when the text is free
+ *   text from a signed-up sender and should be passed on to Core.
  */
-export function handleText(registry: Registry, phone: string, text: string): string {
+export function handleText(registry: Registry, phone: string, text: string): string | null {
   const command = parseCommand(text);
   const status = registry.status(phone);
 
@@ -42,6 +43,6 @@ export function handleText(registry: Registry, phone: string, text: string): str
 
   if (status === "opted_out") return NOT_SIGNED_UP;
 
-  // Opted in and sent free text. Later this goes to Core's /event.
-  return ACKNOWLEDGED;
+  // Opted in and sent free text: the caller forwards it to Core.
+  return null;
 }
