@@ -60,6 +60,16 @@ describe("POST /actions", () => {
     expect(res.status).toBe(400);
   });
 
+  it.each(["cf-connecting-ip", "x-forwarded-for", "cf-ray"])("refuses a request that came through the tunnel (%s)", async (header) => {
+    const { app, placeCall } = build();
+    const res = await request(app)
+      .post("/actions")
+      .set(header, "203.0.113.9")
+      .send({ actions: [{ type: "place_call", person_id: "p", to: "+15550001111", script: "s", reason: "r" }] });
+    expect(res.status).toBe(403);
+    expect(placeCall).not.toHaveBeenCalled();
+  });
+
   it("serves a health check", async () => {
     const { app } = build();
     expect((await request(app).get("/health")).body).toEqual({ status: "ok", lane: "voice" });

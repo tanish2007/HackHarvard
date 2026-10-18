@@ -12,6 +12,8 @@ import { createActionsRouter } from "./actionsRouter.js";
 import { ElevenLabsPlacer } from "./elevenlabs.js";
 import { fetchPersonLanguage } from "./personLanguage.js";
 import { createLlmRouter } from "./llmRouter.js";
+import { startRadioCall } from "./radio.js";
+import { createRadioRouter } from "./radioRouter.js";
 
 /**
  * Read a required environment variable.
@@ -63,6 +65,23 @@ app.use(
     coreTimeoutMs: Number(process.env.VOICE_CORE_TIMEOUT_MS) || 12000,
   }),
 );
+// Starts the always-open radio call. It needs the radio agent and the phone
+// next to the radio, so it is only mounted when both are configured.
+const radioAgentId = process.env.ELEVENLABS_RADIO_AGENT_ID;
+const radioPhone = process.env.RADIO_PHONE;
+if (radioAgentId && radioPhone) {
+  app.use(
+    createRadioRouter({
+      startCall: () =>
+        startRadioCall({
+          apiKey: need("ELEVENLABS_API_KEY"),
+          radioAgentId,
+          phoneNumberId: need("ELEVENLABS_PHONE_NUMBER_ID"),
+          to: radioPhone,
+        }),
+    }),
+  );
+}
 app.use(actionsErrorHandler);
 
 const port = Number(process.env.VOICE_PORT ?? 3001);

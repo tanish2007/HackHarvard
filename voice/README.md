@@ -44,3 +44,25 @@ curl -s "https://api.elevenlabs.io/v1/convai/conversations?agent_id=$ELEVENLABS_
 - `POST /actions`: Core pushes `place_call` here. Answers 200 only if every call was requested, 502 if any failed.
 - `POST /llm/:secret/v1/chat/completions`: ElevenLabs custom LLM. Streams server-sent events.
 - `GET /health`.
+
+## Radio
+
+A spare phone sits on speaker next to the GMRS radio. Relay calls it with a second ElevenLabs agent, and the call stays open. Everything said on the radio goes to Core, which only answers when it hears "Relay" first.
+
+Start it with `npm run radio` (from `voice/`), or `POST /radio/start` on localhost. It calls `RADIO_PHONE`, or `TEST_CALL_TO` if that is not set, with `ELEVENLABS_RADIO_AGENT_ID`.
+
+The radio agent is a copy of the main agent with these differences:
+
+- **Custom LLM model ID `relay-radio`.** The speech endpoint treats that model as the radio: no filler, and silence when Core returns nothing.
+- **`skip_turn` system tool on**, so staying quiet is a real action. Without it the agent has nothing to do on silence and the server sends an empty reply.
+- **No first message**, so it waits silently when answered.
+- **Backup LLMs disabled**, or a failure would hand the radio to a generic chatty model.
+- **Speculative turn off**, or ElevenLabs sends the same question several times.
+- **Call limit raised to 3600 s**, and no silence timeout.
+- **"Relay" as a speech recognition keyword**, on both agents, so it is less often heard as "Really".
+
+Notes from testing:
+
+- Say "Relay" first on every line you want answered. Anything else is chatter and gets silence. Core also accepts "Really" or "Rely" as the first word when a request follows it.
+- A phone that goes to voicemail will not ring. Save the Photon number as a contact on the radio phone.
+- `POST /actions` and `POST /radio/start` refuse requests that came through the public tunnel, since either can place a call to any number. Only localhost may use them.

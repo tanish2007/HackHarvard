@@ -9,6 +9,7 @@
     "test": "vitest run",
     "ring": "tsx --env-file=.env scripts/ring.ts",
     "start": "tsx --env-file=.env src/server.ts",
+    "radio": "tsx --env-file=.env scripts/radio.ts",
     "tunnel": "tsx --env-file=.env scripts/tunnel.ts"
   },
   "devDependencies": {

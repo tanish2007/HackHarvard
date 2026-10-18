@@ -5,11 +5,15 @@
  * the human-confirmed escalation call. The body is a Contract B list. Core
  * reports "delivered" from a 2xx answer, so this answers 502 when any call
  * failed. A 200 must mean every call was really requested.
+ *
+ * It can place a call to any number, so it refuses requests that came through
+ * the public tunnel. Only Core on localhost may use it.
  */
 import express, { Router } from "express";
 import { asyncHandler } from "./asyncHandler.js";
 import { parseActions } from "./coreClient.js";
 import { executeActions } from "./executor.js";
+import { localOnly } from "./localOnly.js";
 import type { CallPlacer } from "./ports.js";
 
 /** Dependencies for {@link createActionsRouter}. */
@@ -38,6 +42,7 @@ export function createActionsRouter(deps: ActionsRouterDeps): Router {
 
   router.post(
     "/actions",
+    localOnly,
     express.json({ limit: "1mb" }),
     asyncHandler(async (req, res) => {
       const actions = parseActions(req.body);
