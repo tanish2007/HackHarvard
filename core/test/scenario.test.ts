@@ -75,21 +75,21 @@ describe("loadScenario", () => {
     writeFileSync(
       join(dir, "scenario.local.json"),
       JSON.stringify({
-        relay_lines: { voice: "+14155559000" },
-        phones: { p_amit: "+14155559001", u_4: "+14155559002", emergency_contact: "+14155559003" },
+        relay_lines: { voice: "+14155550150" },
+        phones: { p_amit: "+14155550151", u_4: "+14155550152", emergency_contact: "+14155550153" },
       }),
     );
     const s = loadScenario({ dir });
-    expect(s.people.find((p) => p.person_id === "p_amit")?.phone).toBe("+14155559001");
-    expect(s.units[0].phone).toBe("+14155559002");
-    expect(s.emergency_contact.phone).toBe("+14155559003");
-    expect(s.relay_lines.voice).toBe("+14155559000");
+    expect(s.people.find((p) => p.person_id === "p_amit")?.phone).toBe("+14155550151");
+    expect(s.units[0].phone).toBe("+14155550152");
+    expect(s.emergency_contact.phone).toBe("+14155550153");
+    expect(s.relay_lines.voice).toBe("+14155550150");
     expect(s.relay_lines.messaging).toBe("+16175550100");
   });
 
   it("rejects an override for an id that does not exist", () => {
     const dir = tempScenarioDir();
-    writeFileSync(join(dir, "scenario.local.json"), JSON.stringify({ phones: { p_nobody: "+14155559001" } }));
+    writeFileSync(join(dir, "scenario.local.json"), JSON.stringify({ phones: { p_nobody: "+14155550151" } }));
     expect(() => loadScenario({ dir })).toThrow(/unknown id "p_nobody"/);
   });
 
