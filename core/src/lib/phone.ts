@@ -25,3 +25,23 @@ export function normalizeHandle(raw: string): string | null {
   if (digits.length === 10) return `+1${digits}`;
   return `+${digits}`;
 }
+
+/**
+ * A stable lookup key for any sender, even one normalizeHandle rejects.
+ *
+ * Carrier short codes like "12345" are not phone numbers, but the same sender
+ * must still match itself, or it signs up again on every message.
+ *
+ * Args:
+ *     raw (string): The handle as a channel sent it.
+ *
+ * Returns:
+ *     string | null: normalizeHandle's result, else the trimmed lowercase
+ *         text, or null if the handle is blank.
+ */
+export function handleKey(raw: string): string | null {
+  const normalized = normalizeHandle(raw);
+  if (normalized) return normalized;
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
