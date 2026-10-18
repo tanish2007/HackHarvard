@@ -1,2 +1,5 @@
 prd.md
 claude.md
+node_modules
+dist
+.env
