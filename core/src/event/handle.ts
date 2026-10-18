@@ -242,7 +242,9 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       if (!person) return [];
       store.removePerson(person.person_id);
       store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} opted out (STOP)` });
-      return [{ type: "send_text", person_id: person.person_id, to: person.handle, text: replies.stopped(incident, person.language), map_url: null }];
+      // No reply: Text owns STOP and already confirmed it. Core only takes
+      // them off the map, which also ends their check-in chain.
+      return [];
     }
 
     case "sos": {
