@@ -8,43 +8,73 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="top">
-    <header>
-      <div>
-        <p class="eyebrow">Relay</p>
-        <h1 id="incident-name">Loading incident</h1>
-        <p id="forecast">Loading forecast</p>
-        <p id="forecast-next"></p>
-        <p id="route-note">Loading route</p>
+  <div class="chrome">
+  <header>
+    <div class="brand-block">
+      <p class="brand">Relay</p>
+      <h1 id="incident-name">Loading incident</h1>
+      <p id="forecast">Loading forecast</p>
+      <p id="forecast-next"></p>
+      <p id="route-note">Loading route</p>
+    </div>
+    <p id="updated"></p>
+    <div class="header-actions">
+      <div class="basemap" role="group" aria-label="Basemap">
+        <button type="button" id="basemap-dark" aria-pressed="true">Dark</button>
+        <button type="button" id="basemap-sat" aria-pressed="false">Satellite</button>
       </div>
-      <p id="updated"></p>
       <p id="mode" class="live">Live</p>
-    </header>
-    <p id="banner" hidden></p>
+    </div>
+  </header>
+  <p id="banner" role="status" hidden></p>
   </div>
   <div class="layout">
     <aside class="counts" aria-label="Resident counts">
-      <div class="count safe"><span id="count-safe">0</span><label>Safe</label></div>
-      <div class="count unconfirmed"><span id="count-unconfirmed">0</span><label>Unconfirmed</label></div>
-      <div class="count sos"><span id="count-sos">0</span><label>SOS</label></div>
-      <div class="count en-route"><span id="count-en-route">0</span><label>En route</label></div>
+      <button type="button" class="count safe" data-status="safe" aria-pressed="false">
+        <span id="count-safe">0</span><span class="count-label">Safe</span>
+      </button>
+      <button type="button" class="count unconfirmed" data-status="unconfirmed" aria-pressed="false">
+        <span id="count-unconfirmed">0</span><span class="count-label">Unconfirmed</span>
+      </button>
+      <button type="button" class="count sos" data-status="sos" aria-pressed="false">
+        <span id="count-sos">0</span><span class="count-label">SOS</span>
+      </button>
+      <button type="button" class="count en-route" data-status="en_route" aria-pressed="false">
+        <span id="count-en-route">0</span><span class="count-label">En route</span>
+      </button>
     </aside>
     <div class="stage">
       <main id="map"></main>
-      <p class="legend" aria-label="Map legend">
-        <span><i class="dot fire"></i>Fire</span>
-        <span><i class="dot weather"></i>Weather</span>
-        <span><i class="dot shelter"></i>Shelter</span>
-        <span><i class="dot safe"></i>Safe</span>
-        <span><i class="dot unconfirmed"></i>Unconfirmed</span>
-        <span><i class="dot sos"></i>SOS</span>
-        <span><i class="dot en-route"></i>En route</span>
-        <span><i class="route-swatch"></i>Route</span>
-      </p>
+      <aside id="drawer" hidden aria-label="Details">
+        <div class="drawer-head">
+          <p id="drawer-status"></p>
+          <button type="button" id="drawer-close">Close</button>
+        </div>
+        <h2 id="drawer-title" tabindex="-1"></h2>
+        <dl id="drawer-rows"></dl>
+      </aside>
+      <div class="map-foot">
+        <label class="window" for="window">
+          Detections
+          <span id="window-label">24h</span>
+          <input id="window" type="range" min="1" max="48" value="24" aria-valuemin="1" aria-valuemax="48">
+        </label>
+        <p id="wind-readout">Wind unavailable</p>
+        <p class="legend" aria-label="Map legend">
+          <span><i class="swatch evacuate"></i>Evacuate now</span>
+          <span><i class="swatch warning"></i>Warning</span>
+          <span><i class="swatch fire"></i>Fire</span>
+          <span><i class="swatch weather"></i>Weather</span>
+          <span><i class="swatch shelter"></i>Shelter</span>
+          <span><i class="route-swatch"></i>Route</span>
+        </p>
+      </div>
     </div>
-    <aside class="feed" aria-label="Timeline">
-      <h2>Timeline</h2>
-      <ol id="timeline"></ol>
+    <aside class="feed" aria-label="Incident feed">
+      <div class="feed-head">
+        <h2>Incident feed</h2>
+      </div>
+      <ol id="feed"></ol>
     </aside>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
