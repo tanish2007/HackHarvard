@@ -166,6 +166,8 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
   const { person, unit } = sender;
   const { intent, text } = classify(event.text, event.channel, store.scenario.settings.wake_phrase);
   const medium: Medium = event.channel === "voice" || event.channel === "radio" ? "spoken" : "text";
+  // Fixed replies go out in the sender's language. Units have none, so English.
+  const lang = person?.language ?? "en";
   const target = person
     ? { id: person.person_id, handle: person.handle }
     : unit
@@ -194,17 +196,17 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
       if (!person) return [];
       store.removePerson(person.person_id);
       store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} opted out (STOP)` });
-      return [{ type: "send_text", person_id: person.person_id, to: person.handle, text: replies.stopped(incident), map_url: null }];
+      return [{ type: "send_text", person_id: person.person_id, to: person.handle, text: replies.stopped(incident, person.language), map_url: null }];
     }
 
     case "sos": {
       if (!person) {
         // No phone number here: the timeline is shown on the dashboard.
         store.addTimeline({ channel: "system", who: "Relay", text: `SOS from ${sender.who}, needs human review` });
-        return [reply(replies.sosUnknown(medium))];
+        return [reply(replies.sosUnknown(medium, lang))];
       }
       const result = store.setStatus(person.person_id, "sos");
-      const actions = [reply(replies.sos(person.name, medium, person.lat !== null))];
+      const actions = [reply(replies.sos(person.name, medium, person.lat !== null, lang))];
       if (result.changed) {
         store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} marked SOS: "${event.text}"` });
         actions.push(...familyAlert(person, store));
@@ -214,28 +216,30 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
 
     case "safe":
     case "en_route": {
-      if (!person) return [reply(replies.fallback(incident, medium === "spoken" ? "voice" : "text"))];
+      if (!person) return [reply(replies.fallback(incident, medium === "spoken" ? "voice" : "text", lang))];
       const result = store.setStatus(person.person_id, intent as PersonStatus);
       if (result.changed) store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} marked ${intent}` });
       if (result.held) store.addTimeline({ channel: "system", who: "Relay", text: `${person.name} says ${intent}, SOS kept until a responder confirms` });
       const body =
-        intent === "safe" ? replies.safe(person.name, result.held, medium) : replies.enRoute(person.name, result.held, medium);
+        intent === "safe"
+          ? replies.safe(person.name, result.held, medium, lang)
+          : replies.enRoute(person.name, result.held, medium, lang);
       return [reply(body)];
     }
 
     case "agent": {
-      if (sender.isNew) return [reply(replies.welcome(incident, event.location !== null))];
-      if (sender.rejoined && person) return [reply(replies.welcomeBack(person.name, incident))];
-      if (person && event.location && !event.text.trim()) return [reply(replies.locationThanks(person.name))];
+      if (sender.isNew) return [reply(replies.welcome(incident, event.location !== null, lang))];
+      if (sender.rejoined && person) return [reply(replies.welcomeBack(person.name, incident, lang))];
+      if (person && event.location && !event.text.trim()) return [reply(replies.locationThanks(person.name, lang))];
       const channelKind = event.channel === "radio" ? "radio" : medium === "spoken" ? "voice" : "text";
-      if (!deps.agent) return [reply(replies.fallback(incident, channelKind))];
+      if (!deps.agent) return [reply(replies.fallback(incident, channelKind, lang))];
       const controller = new AbortController();
       try {
         const run = deps.agent({ event, text, person, unit, who: sender.who, signal: controller.signal });
         return await withTimeout(run, AGENT_TIMEOUT_MS, controller);
       } catch (err) {
         console.error(`[core] agent failed for ${event.event_id}:`, err);
-        return [reply(replies.fallback(incident, channelKind))];
+        return [reply(replies.fallback(incident, channelKind, lang))];
       }
     }
   }
