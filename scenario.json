@@ -114,6 +114,7 @@
     "hazard_poll_sec": 30,
     "alert_radius_km": 4,
     "wake_phrase": "relay",
-    "command_post": "pl_command_post"
+    "command_post": "pl_command_post",
+    "alerts": "manual"
   }
 }

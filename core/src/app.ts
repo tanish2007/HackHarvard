@@ -1,10 +1,15 @@
 /**
  * Core's HTTP routes, as one Express router the root server mounts.
  *
- * POST /event (Contract A in, Contract B out), GET /state (Contract D), and
- * GET /health.
+ * POST /event (Contract A in, Contract B out), GET /state (Contract D),
+ * GET /health, POST /escalations/:person_id/confirm (the dashboard's "call
+ * 911" button), and the local demo controls POST /admin/alert and
+ * POST /admin/reset.
  */
-import express, { Router } from "express";
+import express, { Router, type Request, type Response } from "express";
+import { z } from "zod";
+import type { HazardWatcher } from "./alerts/watcher.js";
+import type { EscalationEngine } from "./escalation/engine.js";
 import { handleEvent, type Agent } from "./event/handle.js";
 import { parseEvent } from "./event/schema.js";
 import type { Dispatcher } from "./dispatch/outbound.js";
@@ -22,12 +27,56 @@ import type { IncidentStore } from "./state/store.js";
  *         rules answer.
  *     dispatcher (Dispatcher | undefined): Pushes actions Core starts on its
  *         own to Text and Voice. Used by alerts, timers, and admin routes.
+ *     watcher (HazardWatcher | undefined): Sends fire alerts. Without it,
+ *         POST /admin/alert answers 503.
+ *     escalation (EscalationEngine | undefined): Runs check-in chains and the
+ *         confirmed 911 call. Without it, no chains run and confirm answers 503.
+ *     adminToken (string | undefined): If set, /admin routes need it in the
+ *         x-relay-admin header. Unset leaves them open, for a laptop demo.
  */
 export interface CoreDeps {
   scenario: Scenario;
   store: IncidentStore;
   agent?: Agent;
   dispatcher?: Dispatcher;
+  watcher?: HazardWatcher;
+  escalation?: EscalationEngine;
+  adminToken?: string;
+}
+
+/** Body of POST /escalations/:person_id/confirm. Every field is optional. */
+const confirmBodySchema = z.object({
+  confirmed_by: z
+    .string()
+    .trim()
+    .max(80)
+    // It goes on the timeline, which must never show a phone number.
+    .refine((s) => !/(\d[\s().+-]*){7,}/.test(s), "confirmed_by must not contain a phone number")
+    .optional(),
+});
+
+/**
+ * Let the dashboard call a route from its own dev server.
+ *
+ * Args:
+ *     res (Response): The response to add CORS headers to.
+ */
+function allowCors(res: Response): void {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "content-type, x-relay-admin");
+}
+
+/**
+ * Answer a CORS preflight.
+ *
+ * Args:
+ *     _req (Request): The OPTIONS request.
+ *     res (Response): The response.
+ */
+function preflight(_req: Request, res: Response): void {
+  allowCors(res);
+  res.sendStatus(204);
 }
 
 /**
@@ -73,9 +122,67 @@ export function createCoreRouter(deps: CoreDeps): Router {
         res.status(400).json({ error: "invalid_event", issues: parsed.issues });
         return;
       }
-      res.json(await handleEvent(parsed.event, { store: deps.store, agent: deps.agent }));
+      res.json(await handleEvent(parsed.event, { store: deps.store, agent: deps.agent, escalation: deps.escalation }));
     }),
   );
+
+  // The dashboard's button for a person in SOS. Relay never calls 911 on its
+  // own: this is the only way the emergency contact gets a call.
+  router.options("/escalations/:person_id/confirm", preflight);
+  router.post(
+    "/escalations/:person_id/confirm",
+    jsonBody,
+    asyncHandler(async (req, res) => {
+      allowCors(res);
+      if (!deps.escalation) {
+        res.status(503).json({ error: "escalation_off" });
+        return;
+      }
+      const body = confirmBodySchema.safeParse(req.body ?? {});
+      if (!body.success) {
+        res.status(400).json({ error: "invalid_body", issues: body.error.issues.map((i) => i.message) });
+        return;
+      }
+      const personId = req.params.person_id;
+      const result = await deps.escalation.confirm(personId, body.data.confirmed_by);
+      if (!result.ok) {
+        res.status(result.error === "unknown_person" ? 404 : 409).json({ error: result.error });
+        return;
+      }
+      // No phone number in the answer: the dashboard only needs to know it went.
+      res.json({ ok: true, person_id: personId, delivered: result.results.every((r) => r.ok) });
+    }),
+  );
+
+  // Local demo controls. Optional token, in case the server is ever tunnelled.
+  router.options("/admin/:action", preflight);
+  router.use("/admin", (req, res, next) => {
+    allowCors(res);
+    if (deps.adminToken && req.get("x-relay-admin") !== deps.adminToken) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    next();
+  });
+
+  router.post(
+    "/admin/alert",
+    asyncHandler(async (_req, res) => {
+      if (!deps.watcher) {
+        res.status(503).json({ error: "watcher_off" });
+        return;
+      }
+      res.json(await deps.watcher.runOnce());
+    }),
+  );
+
+  // Back to the scenario's starting state, so the demo can run twice in a row.
+  router.post("/admin/reset", (_req, res) => {
+    deps.watcher?.reset();
+    deps.escalation?.reset();
+    deps.store.reset();
+    res.json({ ok: true });
+  });
 
   router.use(jsonErrorHandler);
   return router;
