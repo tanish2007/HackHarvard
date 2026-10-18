@@ -1,11 +1,13 @@
 /**
  * Core's HTTP routes, as one Express router the root server mounts.
  *
- * Endpoints are added here as they are built. /event (Contract A to B) comes
- * next.
+ * POST /event (Contract A in, Contract B out), GET /state (Contract D), and
+ * GET /health.
  */
 import express, { Router } from "express";
-import { jsonErrorHandler } from "./lib/asyncHandler.js";
+import { handleEvent, type Agent } from "./event/handle.js";
+import { parseEvent } from "./event/schema.js";
+import { asyncHandler, jsonErrorHandler } from "./lib/asyncHandler.js";
 import type { Scenario } from "./scenario/schema.js";
 import type { IncidentStore } from "./state/store.js";
 
@@ -15,10 +17,12 @@ import type { IncidentStore } from "./state/store.js";
  * Attributes:
  *     scenario (Scenario): The loaded scenario (Contract E).
  *     store (IncidentStore): The live incident state.
+ *     agent (Agent | undefined): The LLM agent. Optional until the agent step.
  */
 export interface CoreDeps {
   scenario: Scenario;
   store: IncidentStore;
+  agent?: Agent;
 }
 
 /**
@@ -52,6 +56,21 @@ export function createCoreRouter(deps: CoreDeps): Router {
     res.set("Cache-Control", "no-store");
     res.json(deps.store.snapshot());
   });
+
+  // Contract A in, Contract B out. A malformed event is a 400 so channel bugs
+  // show up early. Everything else is a 200 with a list, possibly empty.
+  router.post(
+    "/event",
+    jsonBody,
+    asyncHandler(async (req, res) => {
+      const parsed = parseEvent(req.body);
+      if (!parsed.ok) {
+        res.status(400).json({ error: "invalid_event", issues: parsed.issues });
+        return;
+      }
+      res.json(await handleEvent(parsed.event, { store: deps.store, agent: deps.agent }));
+    }),
+  );
 
   router.use(jsonErrorHandler);
   return router;
