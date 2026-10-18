@@ -4,7 +4,8 @@
  * which way the fire is.
  */
 import { describe, expect, it } from "vitest";
-import { compassDirection, distanceKm } from "../src/lib/geo.js";
+import { compassDirection, distanceKm, escapeFrom } from "../src/lib/geo.js";
+import { replies } from "../src/event/replies.js";
 
 const pairs: [string, number, number, number, number][] = [
   ["two demo shelters", 37.87, -122.27, 37.847, -122.258],
@@ -92,5 +93,22 @@ describe("compassDirection", () => {
 
   it("says north for the same point rather than failing", () => {
     expect(compassDirection(C[0], C[1], C[0], C[1])).toBe("north");
+  });
+});
+
+describe("escapeFrom", () => {
+  // Amit is southwest of the scenario fire, so away is southwest.
+  const fire = { lat: 37.872, lng: -122.205, radius_km: 1.2 };
+
+  it("points directly away from the nearest fire", () => {
+    expect(escapeFrom(37.851, -122.224, [fire])).toMatchObject({ direction: "northeast", away: "southwest", inside: false });
+    expect(escapeFrom(37.851, -122.224, [])).toBeNull();
+  });
+
+  it("puts the escape direction in the check-in call, in the person's language", () => {
+    const escape = escapeFrom(37.851, -122.224, [fire])!;
+    expect(replies.checkinCall("Oak Ridge Fire", "en", escape)).toMatch(/northeast of you\. To get away from the fire, head southwest\. Are you safe/);
+    expect(replies.checkinCall("Oak Ridge Fire", "es", escape)).toContain("suroeste");
+    expect(replies.checkinCall("Oak Ridge Fire", "en")).not.toMatch(/head/);
   });
 });
