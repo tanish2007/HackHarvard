@@ -13,8 +13,10 @@ import express from "express";
 import type { LlmCall, LlmClient, LlmRequest, LlmResult } from "../src/agent/llm.js";
 import { TOOLS, type ToolContext } from "../src/agent/tools.js";
 import { createCoreRouter } from "../src/app.js";
-import type { RelayEvent } from "../src/contracts.js";
+import type { RelayAction, RelayEvent } from "../src/contracts.js";
 import { createStubData } from "../src/data/stub.js";
+import type { Dispatcher } from "../src/dispatch/outbound.js";
+import type { Scheduler } from "../src/lib/scheduler.js";
 import type { Agent } from "../src/event/handle.js";
 import { loadScenario } from "../src/scenario/load.js";
 import type { Scenario } from "../src/scenario/schema.js";
@@ -264,6 +266,72 @@ export async function runTool(name: string, args: Record<string, unknown>, ctx: 
   const tool = TOOLS.find((t) => t.declaration.name === name);
   if (!tool) throw new Error(`no tool named ${name}`);
   return tool.run(args, ctx);
+}
+
+/**
+ * Let pending promise callbacks run, so async timer steps can finish.
+ *
+ * Returns:
+ *     Promise<void>: Resolves after a few event loop turns.
+ */
+export async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * A Scheduler whose time only moves when the test says so.
+ *
+ * Returns:
+ *     { scheduler: Scheduler, advance: (sec: number) => Promise<void>, pending: () => number }:
+ *         The scheduler, a function that runs everything due within the next
+ *         `sec` seconds in order, and the number of jobs still waiting.
+ */
+export function fakeScheduler() {
+  let now = 0;
+  let nextId = 0;
+  const jobs = new Map<number, { at: number; fn: () => void }>();
+  const scheduler: Scheduler = {
+    schedule(fn, ms) {
+      const id = nextId++;
+      jobs.set(id, { at: now + ms, fn });
+      return () => jobs.delete(id);
+    },
+  };
+  const advance = async (sec: number): Promise<void> => {
+    const target = now + sec * 1000;
+    for (;;) {
+      const due = [...jobs].filter(([, j]) => j.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!due) break;
+      jobs.delete(due[0]);
+      now = due[1].at;
+      due[1].fn();
+      await flush();
+    }
+    now = target;
+  };
+  return { scheduler, advance, pending: () => jobs.size };
+}
+
+/**
+ * A Dispatcher that records every push instead of sending it.
+ *
+ * Args:
+ *     ok (boolean): What each lane reports. Defaults to true.
+ *
+ * Returns:
+ *     { dispatcher: Dispatcher, pushed: RelayAction[] }: The dispatcher and
+ *         every action pushed so far, in order.
+ */
+export function recordingDispatcher(ok = true) {
+  const pushed: RelayAction[] = [];
+  const dispatcher: Dispatcher = {
+    async push(actions) {
+      pushed.push(...structuredClone(actions));
+      const lanes = [...new Set(actions.map((a) => (a.type === "send_text" ? "text" : "voice")))] as ("text" | "voice")[];
+      return lanes.map((lane) => ({ lane, count: actions.length, ok, ...(ok ? {} : { error: "status 500" }) }));
+    },
+  };
+  return { dispatcher, pushed };
 }
 
 /**

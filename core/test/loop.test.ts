@@ -2,8 +2,9 @@
  * Tests for the agent loop (createAgent), driven by a scripted fake LlmClient.
  * Never calls Gemini.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LlmRequest } from "../src/agent/llm.js";
+import { handleEvent } from "../src/event/handle.js";
 import { createAgent } from "../src/agent/loop.js";
 import type { RelayEvent } from "../src/contracts.js";
 import { createStubData } from "../src/data/stub.js";
@@ -115,6 +116,20 @@ describe("agent loop", () => {
       answer("Help is being alerted."),
     ]);
     expect(actions.map((a) => ("person_id" in a ? a.person_id : a.type))).toEqual(["p_amit", "p_priya"]);
+  });
+
+  it("still texts the family through handleEvent when the agent fails after raising an SOS", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { store } = makeStore();
+    const { llm } = scriptedLlm([
+      toolCalls({ name: "set_status", args: { person_id: "p_amit", status: "sos", reason: "house on fire" } }),
+      answer(""),
+    ]);
+    const agent = createAgent({ store, data: createStubData(store.scenario), llm });
+    const { actions } = await handleEvent(makeEvent({ text: "my house is on fire what do I do" }), { store, agent });
+    expect(store.getPerson("p_amit")?.status).toBe("sos");
+    expect(actions).toContainEqual(expect.objectContaining({ type: "send_text", person_id: "p_priya" }));
+    vi.restoreAllMocks();
   });
 
   it("never sends a phone number to the model", async () => {

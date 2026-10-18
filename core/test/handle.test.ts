@@ -74,12 +74,27 @@ describe("finding the sender", () => {
     expect(store.getPerson("p_amit")?.status).toBe("safe");
   });
 
-  it("uses person_id when the phone is unknown, and replies to the stored handle", async () => {
+  it("trusts person_id on a voice call even when the number is unknown", async () => {
     const { store } = makeStore();
-    const [action] = await send(store, { person_id: "p_priya", from: PHONES.stranger, text: "I'm safe" });
-    expect(action).toMatchObject({ person_id: "p_priya", to: PHONES.priya });
+    await send(store, { channel: "voice", person_id: "p_priya", from: PHONES.stranger, text: "I'm safe" });
     expect(store.getPerson("p_priya")?.status).toBe("safe");
     expect(store.findPersonByHandle(PHONES.stranger)).toBeUndefined();
+  });
+
+  it("ignores a text person_id whose number does not match the sender", async () => {
+    const { store } = makeStore();
+    const [action] = await send(store, { person_id: "p_priya", from: PHONES.stranger, text: "I'm safe" });
+    expect(store.getPerson("p_priya")?.status).toBe("unconfirmed");
+    expect(action).toMatchObject({ to: PHONES.stranger });
+    expect(store.findPersonByHandle(PHONES.stranger)).toBeDefined();
+  });
+
+  it("does not merge two strangers who share the last 4 digits", async () => {
+    const { store } = makeStore();
+    await send(store, { from: PHONES.stranger, person_id: "p_0150", text: "hi" });
+    await send(store, { from: "+14155550150", person_id: "p_0150", text: "I'm safe" });
+    expect(store.getPerson("p_0150")?.status).toBe("unconfirmed");
+    expect(store.findPersonByHandle("+14155550150")).toBeDefined();
   });
 
   it("falls back to the phone when person_id is unknown", async () => {

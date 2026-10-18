@@ -8,9 +8,11 @@ import { existsSync } from "node:fs";
 import express from "express";
 import { createGeminiClient, DEFAULT_GEMINI_MODEL } from "./core/src/agent/gemini.js";
 import { createAgent } from "./core/src/agent/loop.js";
+import { createHazardWatcher } from "./core/src/alerts/watcher.js";
 import { createCoreRouter } from "./core/src/app.js";
 import { createStubData } from "./core/src/data/stub.js";
 import { createHttpDispatcher } from "./core/src/dispatch/outbound.js";
+import { createEscalationEngine } from "./core/src/escalation/engine.js";
 import type { Agent } from "./core/src/event/handle.js";
 import { jsonErrorHandler } from "./core/src/lib/asyncHandler.js";
 import { loadScenario, placeholderIds } from "./core/src/scenario/load.js";
@@ -47,11 +49,32 @@ if (process.env.GEMINI_API_KEY) {
   console.warn("[core] agent off: set GEMINI_API_KEY in .env. Keyword rules still work.");
 }
 
+// Check-in chains after an alert. It never calls 911: only the dashboard's
+// confirm button does, after a human decides.
+const escalation = createEscalationEngine({ store, dispatcher });
+const watcher = createHazardWatcher({ store, data, dispatcher, checkins: escalation });
+
 const app = express();
-app.use(createCoreRouter({ scenario, store, agent, dispatcher }));
+app.use(
+  createCoreRouter({
+    scenario,
+    store,
+    agent,
+    dispatcher,
+    watcher,
+    escalation,
+    adminToken: process.env.RELAY_ADMIN_TOKEN || undefined,
+  }),
+);
 app.use(jsonErrorHandler);
 
 const port = Number(process.env.PORT ?? 3000);
 app.listen(port, () => {
   console.log(`[relay] ${scenario.incident.name} running on http://localhost:${port}`);
+  if (scenario.settings.alerts === "auto") {
+    watcher.start();
+    console.log(`[core] fire alerts: auto, polling hazards every ${scenario.settings.hazard_poll_sec}s`);
+  } else {
+    console.log("[core] fire alerts: manual, POST /admin/alert to send them");
+  }
 });

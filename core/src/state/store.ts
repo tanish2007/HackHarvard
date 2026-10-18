@@ -110,6 +110,8 @@ export class IncidentStore {
   private timeline: TimelineEntry[] = [];
   private seenEvents = new Map<string, CoreResponse>();
   private optedOut = new Map<string, TrackedPerson>();
+  private sosAt = new Map<string, string>();
+  private lastText = new Map<string, string>();
   private newPeopleCount = 0;
   private updatedAt = "";
 
@@ -160,7 +162,7 @@ export class IncidentStore {
       ]),
     );
     const fire = this.scenario.fire_area;
-    // Placeholder until the hazard watcher pulls Rudra's get_hazards.
+    // Placeholder until the hazard watcher's first poll calls setHazards.
     this.hazards = [
       {
         id: "hz_scenario_fire",
@@ -177,6 +179,8 @@ export class IncidentStore {
     this.timeline = [];
     this.seenEvents = new Map();
     this.optedOut = new Map();
+    this.sosAt = new Map(this.scenario.people.filter((p) => p.initial_status === "sos").map((p) => [p.person_id, at]));
+    this.lastText = new Map();
     this.newPeopleCount = 0;
     this.updatedAt = at;
   }
@@ -330,16 +334,41 @@ export class IncidentStore {
    *     personId (string): Who got in touch.
    *     location ({ lat: number, lng: number } | null): New location, or null
    *         to keep the last known one.
+   *     text (string | undefined): What they said. Kept as their last message
+   *         for the 911 briefing. Blank text keeps the previous one.
    */
-  recordContact(personId: string, location: { lat: number; lng: number } | null): void {
+  recordContact(personId: string, location: { lat: number; lng: number } | null, text?: string): void {
     const p = this.people.get(personId);
     if (!p) return;
     p.last_contact = this.nowIso();
+    if (text?.trim()) this.lastText.set(personId, text.trim());
     if (location) {
       p.lat = location.lat;
       p.lng = location.lng;
     }
     this.touch();
+  }
+
+  /**
+   * Change the language Relay talks to a person in.
+   *
+   * Used when someone texts in another language, so their next replies,
+   * family alerts, and the agent switch to it.
+   *
+   * Args:
+   *     personId (string): Who to update.
+   *     language (string): The new language code, e.g. "es".
+   *
+   * Returns:
+   *     boolean: True if it changed. False if it was already that language
+   *         or the person is unknown.
+   */
+  setLanguage(personId: string, language: string): boolean {
+    const p = this.people.get(personId);
+    if (!p || p.language === language) return false;
+    p.language = language;
+    this.touch();
+    return true;
   }
 
   /**
@@ -370,8 +399,75 @@ export class IncidentStore {
     }
     if (previous === status) return { changed: false, previous, held: false };
     p.status = status;
+    if (status === "sos") this.sosAt.set(personId, this.nowIso());
+    else this.sosAt.delete(personId);
     this.touch();
     return { changed: true, previous, held: false };
+  }
+
+  /**
+   * When a person went into SOS.
+   *
+   * Args:
+   *     personId (string): The person.
+   *
+   * Returns:
+   *     string | null: ISO time of the current SOS, or null if they are not
+   *         in SOS. People who start in SOS count from the last reset.
+   */
+  sosSince(personId: string): string | null {
+    const p = this.people.get(personId);
+    if (!p || p.status !== "sos") return null;
+    return this.sosAt.get(personId) ?? null;
+  }
+
+  /**
+   * The last non-empty message a person sent.
+   *
+   * Args:
+   *     personId (string): The person.
+   *
+   * Returns:
+   *     string | null: Their last message text, or null if they have not
+   *         sent one since the last reset.
+   */
+  lastMessage(personId: string): string | null {
+    return this.lastText.get(personId) ?? null;
+  }
+
+  /**
+   * Replace the hazards on the map with what the data layer returned.
+   *
+   * Only the Contract C hazard fields are kept, so extra fields from the
+   * data layer never leak into /state. An empty updated_at is stamped with
+   * the current time.
+   *
+   * Args:
+   *     hazards (Hazard[]): The full current list. [] clears the map.
+   */
+  setHazards(hazards: Hazard[]): void {
+    const at = this.nowIso();
+    this.hazards = hazards.map((h) => ({
+      id: h.id,
+      kind: h.kind,
+      lat: h.lat,
+      lng: h.lng,
+      radius_km: h.radius_km,
+      severity: h.severity,
+      source: h.source,
+      updated_at: h.updated_at || at,
+    }));
+    this.touch();
+  }
+
+  /**
+   * The hazards currently on the map.
+   *
+   * Returns:
+   *     Hazard[]: Copies, in the order the data layer returned them.
+   */
+  listHazards(): Hazard[] {
+    return this.hazards.map((h) => ({ ...h }));
   }
 
   /**

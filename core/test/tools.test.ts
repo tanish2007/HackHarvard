@@ -59,6 +59,13 @@ describe("set_status", () => {
   });
 });
 
+describe("plan_route", () => {
+  it("throws when no destination is given, instead of routing to the start", async () => {
+    const { store } = makeStore();
+    expect(await rejection(runTool("plan_route", {}, toolContext(store)))).toMatch(/destination/i);
+  });
+});
+
 describe("lookups", () => {
   it("lists known places when a place is unknown", async () => {
     const { store } = makeStore();
