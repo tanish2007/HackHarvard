@@ -6,6 +6,8 @@
  * anything itself. It only returns actions for the channels to carry out.
  */
 import type { CoreResponse, RelayAction, RelayEvent } from "../contracts.js";
+import { detectLanguage } from "../lang/detect.js";
+import { resolveLang } from "../lang/languages.js";
 import { classify } from "../rules/fastpath.js";
 import type { PersonStatus } from "../scenario/schema.js";
 import type { IncidentStore, TrackedPerson, TrackedUnit } from "../state/store.js";
@@ -111,6 +113,9 @@ export async function handleEvent(event: RelayEvent, deps: HandlerDeps): Promise
 /**
  * Work out who sent the event, record the contact, and log the message.
  *
+ * Also switches the person's language when the message is clearly in
+ * another one (see lang/detect.ts). Short or mixed messages never do.
+ *
  * Args:
  *     event (RelayEvent): The event.
  *     store (IncidentStore): The live state.
@@ -138,6 +143,10 @@ function resolveSender(event: RelayEvent, store: IncidentStore): Sender {
 
   if (unit) store.markUnitHeard(unit.unit_id);
   if (person) {
+    // Switch language only when the message clearly is in another one, so
+    // even the welcome to a new Spanish texter is in Spanish.
+    const detected = event.channel === "radio" ? null : detectLanguage(event.text);
+    if (detected && detected !== resolveLang(person.language)) store.setLanguage(person.person_id, detected);
     store.recordContact(person.person_id, event.location);
     person = store.getPerson(person.person_id);
   }
@@ -166,8 +175,9 @@ async function route(event: RelayEvent, sender: Sender, deps: HandlerDeps): Prom
   const { person, unit } = sender;
   const { intent, text } = classify(event.text, event.channel, store.scenario.settings.wake_phrase);
   const medium: Medium = event.channel === "voice" || event.channel === "radio" ? "spoken" : "text";
-  // Fixed replies go out in the sender's language. Units have none, so English.
-  const lang = person?.language ?? "en";
+  // Fixed replies go out in the sender's language. Units get English, and an
+  // unknown caller gets the language their message is clearly in, if any.
+  const lang = person?.language ?? (unit ? "en" : (detectLanguage(event.text) ?? "en"));
   const target = person
     ? { id: person.person_id, handle: person.handle }
     : unit
