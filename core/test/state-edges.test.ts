@@ -112,7 +112,7 @@ describe("counts and ordering", () => {
     expect(makeStore(scenario).store.snapshot().counts.unconfirmed).toBe(5);
   });
 
-  it("always adds up to the number of residents", () => {
+  it("adds up to the number of residents on the map when everyone has a location", () => {
     const scenario = loadEdited((f) => Object.assign(f.simulated_population, { count: 30, sos: 4, unconfirmed: 7 }));
     const { counts, people } = makeStore(scenario).store.snapshot();
     expect(counts.safe + counts.unconfirmed + counts.sos + counts.en_route).toBe(people.length);

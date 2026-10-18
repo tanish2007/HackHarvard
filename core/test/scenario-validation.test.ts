@@ -13,6 +13,8 @@ import { errorMessage, loadEdited, ROOT, writeScenarioDir, type ScenarioJson } f
 
 type Edit = (f: ScenarioJson) => void;
 
+const PHONE_AMIT = "+16175550101";
+
 describe("scenario.json: wrong types and bad values", () => {
   const cases: [string, Edit, RegExp][] = [
     ["a latitude given as a string", (f) => (f.people[0].lat = "37.851"), /"lat"/],
@@ -67,6 +69,8 @@ describe("scenario.json: missing fields", () => {
     "emergency_contact",
     "agents",
     "settings",
+    "places",
+    "fake_weather",
   ];
 
   it.each(topLevel)("rejects a file with no %s", (key) => {
@@ -176,6 +180,83 @@ describe("scenario.json: duplicate ids", () => {
 
   it.each(dupes)("rejects a duplicate %s id", (_label, edit, message) => {
     expect(errorMessage(() => loadEdited(edit))).toMatch(message);
+  });
+});
+
+describe("scenario.json: places, fake weather, and the command post", () => {
+  it("loads the committed places and forecast", () => {
+    const s = loadScenario({ dir: ROOT, useLocal: false });
+    expect(s.places.map((p) => p.id)).toEqual(["pl_command_post", "pl_oak_st", "pl_pine_ave", "pl_route_24"]);
+    expect(s.settings.command_post).toBe("pl_command_post");
+    expect(s.fake_weather).toMatchObject({ wind_mph: 22, wind_dir: "NE" });
+  });
+
+  it("rejects a duplicate place id", () => {
+    expect(errorMessage(() => loadEdited((f) => f.places.push({ ...f.places[1], name: "Copy" })))).toMatch(
+      /Duplicate place id "pl_oak_st"/,
+    );
+  });
+
+  it("rejects a command post that is not a place", () => {
+    expect(errorMessage(() => loadEdited((f) => (f.settings.command_post = "sh_a")))).toMatch(
+      /settings\.command_post: unknown place "sh_a"/,
+    );
+  });
+
+  it("rejects a missing command post", () => {
+    expect(errorMessage(() => loadEdited((f) => delete f.settings.command_post))).toMatch(/"command_post"/);
+  });
+
+  it("rejects no places at all, since the command post must be one", () => {
+    expect(errorMessage(() => loadEdited((f) => (f.places = [])))).toMatch(/command_post/);
+  });
+
+  const bad: [string, Edit, RegExp][] = [
+    ["a place with no aliases list", (f) => delete f.places[0].aliases, /"aliases"/],
+    ["an empty alias", (f) => (f.places[0].aliases = [""]), /"aliases"/],
+    ["a place latitude as a string", (f) => (f.places[0].lat = "37.86"), /"lat"/],
+    ["wind speed as a string", (f) => (f.fake_weather.wind_mph = "22"), /"wind_mph"/],
+    ["a forecast with no next_2h", (f) => delete f.fake_weather.next_2h, /"next_2h"/],
+  ];
+
+  it.each(bad)("rejects %s", (_label, edit, field) => {
+    expect(errorMessage(() => loadEdited(edit))).toMatch(field);
+  });
+});
+
+describe("scenario.json: shared phone numbers", () => {
+  // With few demo phones it is easy to reuse one. Then a resident's texts
+  // resolve to the unit, and their SOS never sets a status.
+  it("rejects a person and a unit with the same phone", () => {
+    expect(errorMessage(() => loadEdited((f) => (f.units[0].phone = PHONE_AMIT)))).toMatch(/Duplicate phone "\+16175550101"/);
+  });
+
+  it("rejects two people with the same phone", () => {
+    expect(errorMessage(() => loadEdited((f) => (f.people[1].phone = PHONE_AMIT)))).toMatch(/Duplicate phone/);
+  });
+
+  it("rejects a shared phone set through scenario.local.json", () => {
+    const local = { phones: { p_amit: "+16175550160", u_4: "+16175550160" } };
+    expect(errorMessage(() => loadEdited(() => {}, local))).toMatch(/Duplicate phone "\+16175550160"/);
+  });
+
+  it("rejects a relay line that is also a person's phone", () => {
+    expect(errorMessage(() => loadEdited((f) => (f.relay_lines.voice = PHONE_AMIT)))).toMatch(
+      /relay_lines\.voice uses the same phone as a person or unit/,
+    );
+  });
+
+  it("allows the emergency contact to share a persona's phone, since it is only ever called", () => {
+    const s = loadEdited((f) => (f.emergency_contact.phone = PHONE_AMIT));
+    expect(s.emergency_contact.phone).toBe(PHONE_AMIT);
+  });
+
+  it("allows many people with no phone", () => {
+    const s = loadEdited((f) => {
+      f.people[0].phone = null;
+      f.people[1].phone = null;
+    });
+    expect(s.people.filter((p) => p.phone === null).length).toBeGreaterThan(2);
   });
 });
 
