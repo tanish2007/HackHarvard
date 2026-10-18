@@ -18,6 +18,7 @@ import type { DataTools } from "../data/types.js";
 import type { Dispatcher } from "../dispatch/outbound.js";
 import { logPushed } from "../event/alerts.js";
 import { replies, type FireAlert } from "../event/replies.js";
+import { computeSpread } from "../fire/forecast.js";
 import { compassDirection, distanceKm } from "../lib/geo.js";
 import { realScheduler, type Cancel, type Scheduler } from "../lib/scheduler.js";
 import type { IncidentStore, TrackedPerson } from "../state/store.js";
@@ -249,7 +250,48 @@ export function createHazardWatcher(options: WatcherOptions): HazardWatcher {
     }
     if (gen !== generation) return empty();
     store.setHazards(hazards);
+    // Forecast each fire's spread alongside the alerts, so texts are not
+    // held up by the weather lookup. Done by the time the run returns.
+    const forecasting = forecastSpread(gen);
+    try {
+      return await alertNearby(gen);
+    } finally {
+      await forecasting;
+    }
+  };
 
+  /**
+   * Work out where each fire on the map is spreading, from the current wind.
+   *
+   * A failed weather lookup leaves the fires without a forecast rather than
+   * failing the run.
+   *
+   * Args:
+   *     gen (number): The run's generation. A reset since then drops the result.
+   */
+  const forecastSpread = async (gen: number): Promise<void> => {
+    const fires = store.listHazards().filter((h) => h.kind === "fire");
+    if (fires.length === 0) return;
+    try {
+      const weather = await data.getWeather(incident.center.lat, incident.center.lng);
+      if (gen !== generation) return;
+      const now = new Date().toISOString();
+      for (const fire of fires) store.setFireSpread(fire.id, computeSpread(fire, weather, store.scenario, now));
+    } catch (err) {
+      log(`[watcher] spread forecast failed: ${String(err)}`);
+    }
+  };
+
+  /**
+   * Text every reachable resident newly in range of a fire.
+   *
+   * Args:
+   *     gen (number): The run's generation. A reset since then sends nothing.
+   *
+   * Returns:
+   *     Promise<AlertSummary>: What was sent.
+   */
+  const alertNearby = async (gen: number): Promise<AlertSummary> => {
     const fires = store.listHazards().filter((h) => h.kind === "fire");
     const targets: { person: TrackedPerson; near: NearFire[] }[] = [];
     for (const person of store.listPeople()) {
