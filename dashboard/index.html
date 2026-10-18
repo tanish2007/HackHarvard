@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relay map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="top">
+    <header>
+      <div>
+        <p class="eyebrow">Relay</p>
+        <h1 id="incident-name">Loading incident</h1>
+      </div>
+      <p id="updated"></p>
+      <p id="mode" class="live">Live</p>
+    </header>
+    <p id="banner" hidden></p>
+  </div>
+  <div class="layout">
+    <aside class="counts" aria-label="Resident counts">
+      <div class="count safe"><span id="count-safe">0</span><label>Safe</label></div>
+      <div class="count unconfirmed"><span id="count-unconfirmed">0</span><label>Unconfirmed</label></div>
+      <div class="count sos"><span id="count-sos">0</span><label>SOS</label></div>
+      <div class="count en-route"><span id="count-en-route">0</span><label>En route</label></div>
+    </aside>
+    <div class="stage">
+      <main id="map"></main>
+      <p class="legend" aria-label="Map legend">
+        <span><i class="dot fire"></i>Fire</span>
+        <span><i class="dot weather"></i>Weather</span>
+        <span><i class="dot shelter"></i>Shelter</span>
+        <span><i class="dot safe"></i>Safe</span>
+        <span><i class="dot unconfirmed"></i>Unconfirmed</span>
+        <span><i class="dot sos"></i>SOS</span>
+        <span><i class="dot en-route"></i>En route</span>
+      </p>
+    </div>
+    <aside class="feed" aria-label="Timeline">
+      <h2>Timeline</h2>
+      <ol id="timeline"></ol>
+    </aside>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

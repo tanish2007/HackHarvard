@@ -1,0 +1,15 @@
+{
+  "features": [
+    {
+      "id": "https://api.weather.gov/alerts/urn:oid:red-flag",
+      "geometry": null,
+      "properties": {
+        "id": "urn:oid:red-flag",
+        "event": "Red Flag Warning",
+        "severity": "Severe",
+        "onset": "2026-10-17T13:50:00Z",
+        "sent": "2026-10-17T13:50:00Z"
+      }
+    }
+  ]
+}

@@ -13,3 +13,9 @@ dist/
 
 # Real phone numbers for demo personas and Relay's own lines
 scenario.local.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+dashboard/backup-state.json
