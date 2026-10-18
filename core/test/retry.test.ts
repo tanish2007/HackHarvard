@@ -1,6 +1,6 @@
 /** Tests for retrying model calls that fail for a moment. */
 import { describe, expect, it, vi } from "vitest";
-import { canFailOver, isTransient, withFailover, withRetry } from "../src/agent/retry.js";
+import { AttemptTimeoutError, canFailOver, isTransient, withFailover, withRetry } from "../src/agent/retry.js";
 
 const apiError = (status: number) => Object.assign(new Error(`status ${status}`), { status });
 const noSleep = vi.fn(async () => {});
@@ -126,5 +126,76 @@ describe("withFailover", () => {
     });
     await expect(withFailover(["a", "b"], call, { signal: controller.signal, sleep: noSleep })).rejects.toMatchObject({ status: 429 });
     expect(call).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** A model call that never answers until it is aborted, like a hung request. */
+const hangsUntilAborted = (signal?: AbortSignal) =>
+  new Promise<string>((_, reject) => {
+    signal?.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")));
+  });
+
+describe("withFailover per-attempt time limit", () => {
+  it("abandons a model that is too slow and uses the next one", async () => {
+    const call = vi.fn(async (model: string, signal?: AbortSignal) => (model === "slow" ? hangsUntilAborted(signal) : model));
+    expect(await withFailover(["slow", "fast"], call, { attemptTimeoutMs: 30, sleep: noSleep })).toBe("fast");
+    expect(call.mock.calls.map((c) => c[0])).toEqual(["slow", "fast"]);
+  });
+
+  it("gives each attempt an abort signal so the request can be cancelled", async () => {
+    let seen: AbortSignal | undefined;
+    const call = vi.fn(async (model: string, signal?: AbortSignal) => {
+      seen = signal;
+      return model === "slow" ? hangsUntilAborted(signal) : "ok";
+    });
+    await withFailover(["slow", "fast"], call, { attemptTimeoutMs: 30, sleep: noSleep });
+    expect(call.mock.calls[0][1]?.aborted).toBe(true);
+    expect(seen?.aborted).toBe(false);
+  });
+
+  it("does not retry a slow model on the same model", async () => {
+    const call = vi.fn(async (_model: string, signal?: AbortSignal) => hangsUntilAborted(signal));
+    await expect(withFailover(["slow"], call, { attemptTimeoutMs: 20, retries: 2, sleep: noSleep })).rejects.toBeInstanceOf(
+      AttemptTimeoutError,
+    );
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws a timeout error naming the last model when every model is too slow", async () => {
+    const call = vi.fn(async (_model: string, signal?: AbortSignal) => hangsUntilAborted(signal));
+    await expect(withFailover(["a", "b"], call, { attemptTimeoutMs: 20, sleep: noSleep })).rejects.toMatchObject({
+      name: "AttemptTimeoutError",
+      model: "b",
+    });
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops the whole chain when Core stops waiting, instead of treating it as a slow model", async () => {
+    const controller = new AbortController();
+    const call = vi.fn(async (_model: string, signal?: AbortSignal) => {
+      setTimeout(() => controller.abort(), 10);
+      return hangsUntilAborted(signal);
+    });
+    const err = await withFailover(["a", "b"], call, { signal: controller.signal, attemptTimeoutMs: 5000, sleep: noSleep }).catch(
+      (e: unknown) => e,
+    );
+    expect(err).not.toBeInstanceOf(AttemptTimeoutError);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes no limit when attemptTimeoutMs is not set", async () => {
+    const call = vi.fn(async (_model: string, signal?: AbortSignal) => {
+      expect(signal).toBeUndefined();
+      return "ok";
+    });
+    expect(await withFailover(["a"], call, { sleep: noSleep })).toBe("ok");
+  });
+
+  it("still fails over on a 429 within the limit, and on a fast answer does nothing extra", async () => {
+    const call = vi.fn(async (model: string) => {
+      if (model === "a") throw apiError(429);
+      return model;
+    });
+    expect(await withFailover(["a", "b"], call, { attemptTimeoutMs: 1000, sleep: noSleep })).toBe("b");
   });
 });
