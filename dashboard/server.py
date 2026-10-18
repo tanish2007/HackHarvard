@@ -2,12 +2,15 @@
 
 GET /state prefers Core at http://localhost:3000/state. A good read is
 saved as dashboard/backup-state.json. A failed read leaves that file
-alone. GET /picture is map chrome only: zones, wind, and scenario phones.
-It is not part of Contract D.
+alone. GET /picture is map chrome only: zones, wind, scenario phones, the
+venue center, and where each unit stands when Core has no coordinates.
+It is not part of Contract D. GET /firms is the live NASA panel. It is
+not the staged fire, and it is not Contract C.
 
 Contract C is also on this server. /weather and /route with no query
-stay the map's existing calls. lat/lng query params call the functions
-directly.
+stay the map's existing calls. The no-query route starts at that
+person's live position from Core when Core has one. lat/lng query
+params call the functions directly.
 
     python dashboard/server.py
 """
@@ -47,10 +50,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data.api import get_hazards, get_route, get_shelters, get_weather  # noqa: E402
+from data.errors import DataSourceError  # noqa: E402
+from data.firms import fetch_fire_hazards  # noqa: E402
 from data.scenario import load_scenario  # noqa: E402
 from data.state import build_route, build_state, build_weather  # noqa: E402
 
 _picture_cache = {"at": 0.0, "body": b""}
+_scenario_route_cache = {"payload": None}
+_live_route_cache = {"key": None, "payload": None}
 
 
 def fetch_core_state():
@@ -97,6 +104,70 @@ def state_bytes():
     body = fetch_core_state()
     BACKUP.write_bytes(body)
     return body
+
+
+def _scenario_route():
+    """Return the scenario route, built once per process.
+
+    Returns:
+        dict: Route fields plus person_name and shelter_name.
+    """
+    if _scenario_route_cache["payload"] is None:
+        _scenario_route_cache["payload"] = build_route()
+    return _scenario_route_cache["payload"]
+
+
+def _live_origin(name):
+    """Read one person's current latitude and longitude from Core.
+
+    Args:
+        name (str): Person name on the route, matched to Core's people list.
+
+    Returns:
+        tuple[float, float] | None: Live coordinates, or None when Core
+        has no such fix.
+    """
+    try:
+        payload = json.loads(fetch_core_state())
+    except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError):
+        return None
+    for person in payload.get("people") or []:
+        if person.get("name") != name:
+            continue
+        try:
+            return float(person["lat"]), float(person["lng"])
+        except (KeyError, TypeError, ValueError):
+            return None
+    return None
+
+
+def map_route():
+    """Return the demo route, starting at Core's live position when it has one.
+
+    The shelter stays the one nearest the scenario home. A failed Core
+    read keeps the scenario start. Repeated polls reuse the line until
+    the live position changes.
+
+    Returns:
+        dict: Route fields plus person_name and shelter_name.
+    """
+    base = _scenario_route()
+    live = _live_origin(base.get("person_name"))
+    if live is None:
+        waiting = dict(base)
+        waiting["polyline"] = []
+        waiting["steps"] = []
+        waiting["distance_km"] = 0.0
+        waiting["duration_min"] = 0.0
+        waiting["avoided_hazards"] = []
+        return waiting
+    key = (base.get("person_name"), round(live[0], 4), round(live[1], 4))
+    if _live_route_cache["key"] == key and _live_route_cache["payload"] is not None:
+        return _live_route_cache["payload"]
+    routed = build_route(start_lat=live[0], start_lng=live[1])
+    _live_route_cache["key"] = key
+    _live_route_cache["payload"] = routed
+    return routed
 
 
 def seed_backup():
@@ -151,10 +222,55 @@ def _query_float(qs, name):
         raise ValueError(name + " must be a number") from exc
 
 
-def picture_bytes():
-    """Serialize zones, wind, and phones for the map chrome.
+def _picture_phones(scenario):
+    """Phones for the map drawer, with scenario.local.json winning.
 
-    Phones are read from scenario.json. They are not added to /state.
+    Args:
+        scenario (dict): Loaded scenario, including simulated people.
+
+    Returns:
+        list[dict]: person_id and phone for everyone who has a number.
+    """
+    overrides = {}
+    local = ROOT / "scenario.local.json"
+    if local.exists():
+        try:
+            parsed = json.loads(local.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            parsed = {}
+        phones = parsed.get("phones") if isinstance(parsed, dict) else None
+        if isinstance(phones, dict):
+            overrides = phones
+    rows = []
+    for person in scenario["people"]:
+        phone = overrides.get(person["person_id"]) or person.get("phone")
+        if phone:
+            rows.append({"person_id": person["person_id"], "phone": phone})
+    return rows
+
+
+def firms_hazards(lat, lng, radius_km):
+    """Return live FIRMS fires, or nothing when NASA does not answer.
+
+    Args:
+        lat (float): Search latitude.
+        lng (float): Search longitude.
+        radius_km (float): Search radius in kilometers.
+
+    Returns:
+        list[dict]: Fire rows. Empty when the key is missing or FIRMS fails.
+    """
+    try:
+        return fetch_fire_hazards(lat, lng, radius_km)
+    except DataSourceError:
+        return []
+
+
+def picture_bytes():
+    """Serialize zones, wind, phones, the venue, and unit stations.
+
+    Phones come from scenario.json, replaced by scenario.local.json when
+    that file has a number. They are not added to /state.
 
     Returns:
         bytes: UTF-8 JSON. Cached for PICTURE_TTL_SEC.
@@ -165,7 +281,23 @@ def picture_bytes():
     scenario = load_scenario()
     center = scenario["incident"]["center"]
     weather = get_weather(center["lat"], center["lng"])
+    command_id = scenario["settings"]["command_post"]
+    command = next(
+        (place for place in scenario.get("places") or [] if place.get("id") == command_id),
+        None,
+    )
+    units = []
+    if command:
+        for unit in scenario.get("units") or []:
+            units.append({
+                "unit_id": unit["unit_id"],
+                "name": unit["name"],
+                "lat": command["lat"],
+                "lng": command["lng"],
+            })
     payload = {
+        "center": {"lat": center["lat"], "lng": center["lng"]},
+        "units": units,
         "zones": [
             {
                 "id": zone["id"],
@@ -182,11 +314,7 @@ def picture_bytes():
             "temp_f": weather["temp_f"],
             "source": weather["source"],
         },
-        "phones": [
-            {"person_id": person["person_id"], "phone": person["phone"]}
-            for person in scenario["people"]
-            if person.get("phone")
-        ],
+        "phones": _picture_phones(scenario),
     }
     body = json.dumps(payload).encode("utf-8")
     _picture_cache["at"] = now
@@ -215,6 +343,13 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
+        if path == "/firms":
+            self._contract(lambda: firms_hazards(
+                _query_float(qs, "lat"),
+                _query_float(qs, "lng"),
+                _query_float(qs, "radius_km"),
+            ))
+            return
         if path == "/hazards":
             self._contract(lambda: get_hazards(
                 _query_float(qs, "lat"),
@@ -237,7 +372,7 @@ class Handler(SimpleHTTPRequestHandler):
                     _query_float(qs, "to_lng"),
                 ))
             else:
-                self._contract(build_route)
+                self._contract(map_route)
             return
         if path == "/weather":
             if "lat" in qs or "lng" in qs:

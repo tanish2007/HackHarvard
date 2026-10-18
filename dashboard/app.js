@@ -21,7 +21,7 @@ const ZONE_STYLE = {
 const LANGUAGE_NAME = { en: "English", es: "Spanish", zh: "Chinese", gu: "Gujarati" };
 const CHANNEL_NAME = { imessage: "iMessage", sms: "SMS", voice: "Voice", radio: "Radio" };
 
-const picture = { zones: [], fire: null, wind: null, phones: {} };
+const picture = { zones: [], fire: null, wind: null, phones: {}, center: null, units: [] };
 let map = null;
 let tiles = null;
 let activeBasemap = "dark";
@@ -38,6 +38,10 @@ const peopleLayers = new Map();
 const reportLayers = new Map();
 const unitLayers = new Map();
 const volunteerLayers = new Map();
+const stateRouteLayers = new Map();
+const linkLayers = new Map();
+let stateRoutes = null;
+let links = null;
 let routeGlow = null;
 let routeLine = null;
 let routeOrigin = null;
@@ -45,12 +49,11 @@ let routeDest = null;
 let routeChip = null;
 let routeMeta = null;
 let perimeterKey = "";
-let fitted = false;
 let feedStick = true;
 let lastState = null;
 let statusFilter = "";
-let windowHours = 24;
-let liveFires = [];
+let fitKey = "";
+let fireBusy = false;
 let inspector = null;
 let feedKey = "";
 let ignoreMapClick = false;
@@ -265,47 +268,8 @@ function zoneLevel(zone, fire) {
   return "watch";
 }
 
-function firmsFires(rows) {
-  return (rows || []).filter((hazard) => hazard && hazard.kind === "fire" && hazard.source === "firms");
-}
-
 function drawnHazards(state) {
-  const weather = (state.hazards || []).filter((hazard) => hazard.kind !== "fire" && hazardInWindow(hazard));
-  return firmsFires(liveFires).filter(hazardInWindow).concat(weather);
-}
-
-function syncZones(fires) {
-  const rows = firmsFires(fires).filter((fire) => fire.lat != null && fire.lng != null);
-  const key = rows.map((fire) => [fire.id, fire.lat, fire.lng, fire.radius_km].join(",")).join("|");
-  if (key === perimeterKey) return;
-  perimeterKey = key;
-  zoneLayer.clearLayers();
-  rows.forEach((fire) => {
-    const polygon = L.polygon(organicRing(fire.lat, fire.lng, fire.radius_km), {
-      pane: "zones",
-      color: "#ef4444",
-      weight: 2,
-      dashArray: "6, 6",
-      fillColor: "#dc2626",
-      fillOpacity: 0.12,
-      className: "evac-perimeter",
-    });
-    polygon.bindTooltip("FIRMS evacuation perimeter");
-    polygon.on("click", () => {
-      holdMapClick();
-      const bounds = polygon.getBounds();
-      if (reduceMotion()) map.fitBounds(bounds, { padding: [36, 36], animate: false });
-      else map.fitBounds(bounds, { padding: [36, 36], maxZoom: 14 });
-    });
-    polygon.addTo(zoneLayer);
-  });
-}
-
-function hazardInWindow(hazard) {
-  if (!hazard.updated_at) return true;
-  const then = Date.parse(hazard.updated_at);
-  if (Number.isNaN(then)) return true;
-  return Date.now() - then <= windowHours * 3600000;
+  return (state.hazards || []).filter((hazard) => hazard && hazard.kind === "fire" && hazard.source !== "scenario");
 }
 
 function render(state) {
@@ -349,28 +313,110 @@ function render(state) {
   syncReports(state.reports);
   syncUnits(state.units);
   syncVolunteers(state.volunteers);
-  syncZones(firmsFires(liveFires).filter(hazardInWindow));
+  syncStateRoutes(state.routes);
+  syncAssignments(state);
   paintFeed(state);
   refreshInspector();
 
-  if (!fitted) {
-    const bounds = [];
-    state.people.forEach((person) => bounds.push([person.lat, person.lng]));
-    state.shelters.forEach((shelter) => bounds.push([shelter.lat, shelter.lng]));
-    visibleHazards.forEach((hazard) => bounds.push([hazard.lat, hazard.lng]));
-    state.reports.forEach((report) => bounds.push([report.lat, report.lng]));
-    state.volunteers.forEach((volunteer) => bounds.push([volunteer.lat, volunteer.lng]));
-    if (bounds.length) {
-      const wide = window.innerWidth > 800;
-      map.fitBounds(bounds, {
-        paddingTopLeft: [wide ? 440 : 28, wide ? 28 : 150],
-        paddingBottomRight: [36, wide ? 72 : Math.round(window.innerHeight * 0.48)],
-        animate: false,
-      });
-      fitted = true;
-    }
+  const fireOn = visibleHazards.length > 0;
+  const fireButton = document.getElementById("fire-toggle");
+  fireButton.textContent = fireOn ? "Turn fire off" : "Turn fire on";
+  fireButton.classList.toggle("is-on", fireOn);
+  fireButton.setAttribute("aria-pressed", fireOn ? "true" : "false");
+
+  const bounds = collectBounds(state, visibleHazards);
+  const key = bounds.map((point) => point[0].toFixed(4) + "," + point[1].toFixed(4)).join("|");
+  if (key && key !== fitKey) {
+    const wide = window.innerWidth > 800;
+    map.fitBounds(bounds, {
+      paddingTopLeft: [wide ? 440 : 28, wide ? 28 : 150],
+      paddingBottomRight: [36, wide ? 72 : Math.round(window.innerHeight * 0.48)],
+      animate: false,
+    });
+    fitKey = key;
     requestAnimationFrame(() => map.invalidateSize());
   }
+}
+
+function collectBounds(state, visibleHazards) {
+  const bounds = [];
+  const push = (lat, lng) => {
+    if (lat == null || lng == null) return;
+    bounds.push([lat, lng]);
+  };
+  state.people.forEach((person) => push(person.lat, person.lng));
+  state.shelters.forEach((shelter) => push(shelter.lat, shelter.lng));
+  visibleHazards.forEach((hazard) => push(hazard.lat, hazard.lng));
+  state.reports.forEach((report) => push(report.lat, report.lng));
+  state.volunteers.forEach((volunteer) => push(volunteer.lat, volunteer.lng));
+  state.units.forEach((unit) => {
+    const at = unitPoint(unit);
+    if (at) push(at.lat, at.lng);
+  });
+  return bounds;
+}
+
+function unitPoint(unit) {
+  if (unit.lat != null && unit.lng != null) return { lat: unit.lat, lng: unit.lng };
+  const staged = (picture.units || []).find((row) => row.unit_id === unit.unit_id);
+  if (!staged || staged.lat == null || staged.lng == null) return null;
+  return { lat: staged.lat, lng: staged.lng };
+}
+
+function syncStateRoutes(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const seen = new Set();
+  list.forEach((route) => {
+    const line = (route.polyline || [])
+      .filter((point) => point && point.lat != null && point.lng != null)
+      .map((point) => [point.lat, point.lng]);
+    if (line.length < 2) return;
+    const key = route.id || (route.for_id + ":" + route.to_id);
+    seen.add(key);
+    const tooltip = route.label || "Route";
+    const existing = stateRouteLayers.get(key);
+    if (existing) {
+      existing.setLatLngs(line);
+      existing.setTooltipContent(tooltip);
+      return;
+    }
+    const layer = L.polyline(line, { color: "#1a73e8", weight: 5, opacity: 0.9 }).bindTooltip(tooltip);
+    layer.addTo(stateRoutes);
+    stateRouteLayers.set(key, layer);
+  });
+  dropMissing(stateRouteLayers, stateRoutes, seen);
+}
+
+function personAt(state, id) {
+  if (!id) return null;
+  const person = state.people.find((row) => row.person_id === id);
+  if (person && person.lat != null) return person;
+  const volunteer = state.volunteers.find((row) => row.volunteer_id === id);
+  if (volunteer && volunteer.lat != null) return volunteer;
+  return null;
+}
+
+function syncAssignments(state) {
+  const seen = new Set();
+  const add = (fromId, from, toId) => {
+    if (!from || from.lat == null || !toId) return;
+    const to = personAt(state, toId);
+    if (!to) return;
+    const key = fromId + ":" + toId;
+    seen.add(key);
+    const line = [[from.lat, from.lng], [to.lat, to.lng]];
+    const existing = linkLayers.get(key);
+    if (existing) {
+      existing.setLatLngs(line);
+      return;
+    }
+    const layer = L.polyline(line, { color: "#5f6368", weight: 2, dashArray: "6 6", opacity: 0.9 });
+    layer.addTo(links);
+    linkLayers.set(key, layer);
+  };
+  state.units.forEach((unit) => add(unit.unit_id, unitPoint(unit), unit.assigned_to));
+  state.volunteers.forEach((volunteer) => add(volunteer.volunteer_id, volunteer, volunteer.assigned_to));
+  dropMissing(linkLayers, links, seen);
 }
 
 function syncHazards(rows) {
@@ -536,8 +582,11 @@ function syncReports(rows) {
     const key = report.id;
     seen.add(key);
     const selected = inspector && inspector.key === "report:" + key;
+    const blocked = report.kind === "road_blocked";
+    const color = blocked ? "#111827" : "#f97316";
+    const label = blocked ? "Road blocked" : (selected ? statusLabel(report.kind) : "");
     const tooltip = statusLabel(report.kind) + ", " + report.text;
-    const icon = pinIcon("#f97316", selected, { small: true, label: selected ? statusLabel(report.kind) : "" });
+    const icon = pinIcon(color, selected, { small: true, label: label });
     const existing = reportLayers.get(key);
     if (existing) {
       existing.setLatLng([report.lat, report.lng]);
@@ -564,19 +613,20 @@ function syncReports(rows) {
 function syncUnits(rows) {
   const seen = new Set();
   rows.forEach((unit) => {
-    if (unit.lat == null || unit.lng == null) return;
+    const at = unitPoint(unit);
+    if (!at) return;
     const key = unit.unit_id;
     seen.add(key);
     const selected = inspector && inspector.key === "unit:" + key;
     const icon = pinIcon("#5f6368", selected, { small: true, label: selected ? unit.name : "" });
     const existing = unitLayers.get(key);
     if (existing) {
-      existing.setLatLng([unit.lat, unit.lng]);
+      existing.setLatLng([at.lat, at.lng]);
       existing.setTooltipContent(unit.name);
       paintMarker(existing, selected, icon, selected ? 400 : 0);
       return;
     }
-    const layer = L.marker([unit.lat, unit.lng], {
+    const layer = L.marker([at.lat, at.lng], {
       pane: "residents",
       icon: icon,
     }).bindTooltip(unit.name);
@@ -584,7 +634,7 @@ function syncUnits(rows) {
     layer.on("click", () => {
       holdMapClick();
       openInspector(unitModel(unit), true);
-      goTo(unit.lat, unit.lng);
+      goTo(at.lat, at.lng);
     });
     layer.addTo(units);
     unitLayers.set(key, layer);
@@ -598,8 +648,9 @@ function syncVolunteers(rows) {
     const key = volunteer.volunteer_id;
     seen.add(key);
     const selected = inspector && inspector.key === "volunteer:" + key;
-    const tooltip = volunteer.name + ", volunteer";
-    const icon = pinIcon("#5f6368", selected, { small: true, label: selected ? volunteer.name : "" });
+    const note = volunteer.capacity_note || "";
+    const tooltip = volunteer.name + (note ? ", " + note : ", volunteer");
+    const icon = pinIcon("#5f6368", selected, { small: true, label: note || (selected ? volunteer.name : "") });
     const existing = volunteerLayers.get(key);
     if (existing) {
       existing.setLatLng([volunteer.lat, volunteer.lng]);
@@ -728,14 +779,16 @@ function reportModel(report) {
 }
 
 function unitModel(unit) {
+  const at = unitPoint(unit);
   const rows = [["Last heard", ago(unit.last_heard)]];
-  if (unit.lat == null || unit.lng == null) rows.push(["Position", "No position yet"]);
+  if (!at) rows.push(["Position", "No position yet"]);
+  else if (unit.lat == null || unit.lng == null) rows.push(["Position", "At the command post"]);
   return {
     key: "unit:" + unit.unit_id,
     title: unit.name,
     status: "unit",
-    lat: unit.lat,
-    lng: unit.lng,
+    lat: at ? at.lat : unit.lat,
+    lng: at ? at.lng : unit.lng,
     rows: rows,
   };
 }
@@ -963,7 +1016,19 @@ function messageFor(card) {
 }
 
 function paintFeed(state) {
-  const cards = buildCards(state);
+  const cards = state.timeline.map((entry, index) => {
+    const spot = locateTimeline(entry, state);
+    return {
+      key: "timeline:" + index + ":" + (entry.at || ""),
+      kind: (entry.channel || "radio").toLowerCase(),
+      title: entry.who || "Update",
+      detail: entry.text,
+      time: ago(entry.at),
+      iso: entry.at,
+      lat: spot ? spot.lat : null,
+      lng: spot ? spot.lng : null,
+    };
+  }).reverse();
   const count = document.getElementById("feed-count");
   if (count) count.textContent = String(cards.length);
   const key = JSON.stringify(cards.map((card) => [card.key, card.title, card.detail, card.kind]));
@@ -974,15 +1039,14 @@ function paintFeed(state) {
     if (!cards.length) {
       const empty = document.createElement("li");
       empty.className = "empty";
-      empty.textContent = "No dispatch in this window.";
+      empty.textContent = "No timeline yet.";
       list.append(empty);
     } else {
       cards.forEach((card) => list.append(feedItem(card)));
       if (feedStick) {
         requestAnimationFrame(() => {
-          const top = list.scrollHeight;
-          if (reduceMotion()) list.scrollTop = top;
-          else list.scrollTo({ top: top, behavior: "smooth" });
+          if (reduceMotion()) list.scrollTop = 0;
+          else list.scrollTo({ top: 0, behavior: "smooth" });
         });
       }
     }
@@ -1251,12 +1315,8 @@ function bindChrome() {
       if (lastState) render(lastState);
     });
   });
-  document.getElementById("window").addEventListener("input", (event) => {
-    windowHours = Number(event.target.value);
-    document.getElementById("window-label").textContent = windowHours + "h";
-    feedKey = "";
-    if (lastState) render(lastState);
-  });
+  document.getElementById("fire-toggle").addEventListener("click", () => toggleFire());
+  document.getElementById("reset-demo").addEventListener("click", () => resetDemo());
   document.getElementById("basemap-dark").addEventListener("click", () => setBasemap("dark"));
   document.getElementById("basemap-sat").addEventListener("click", () => setBasemap("sat"));
   document.getElementById("layers-toggle").addEventListener("click", () => {
@@ -1282,7 +1342,7 @@ function bindChrome() {
   window.addEventListener("resize", () => map.invalidateSize());
   const feed = document.getElementById("feed");
   feed.addEventListener("scroll", () => {
-    feedStick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 72;
+    feedStick = feed.scrollTop < 72;
   });
   if (typeof ResizeObserver !== "undefined") {
     const observer = new ResizeObserver(() => {
@@ -1297,6 +1357,8 @@ async function fetchPicture() {
   const body = await readJson(response);
   picture.zones = Array.isArray(body.zones) ? body.zones : [];
   picture.fire = body.fire_area || null;
+  picture.center = body.center || null;
+  picture.units = Array.isArray(body.units) ? body.units : [];
   picture.wind = body.wind || null;
   picture.phones = {};
   (body.phones || []).forEach((row) => {
@@ -1313,7 +1375,8 @@ function initMap() {
   map.getPane("residents").style.zIndex = 640;
   map.createPane("hud");
   map.getPane("hud").style.zIndex = 680;
-  if (picture.fire) map.setView([picture.fire.lat, picture.fire.lng], 13);
+  const start = picture.center || picture.fire;
+  if (start) map.setView([start.lat, start.lng], 14);
   else map.setView([0, 0], 2);
   setBasemap("dark");
   hazards = L.layerGroup().addTo(map);
@@ -1322,6 +1385,8 @@ function initMap() {
   reports = L.layerGroup().addTo(map);
   units = L.layerGroup().addTo(map);
   volunteers = L.layerGroup().addTo(map);
+  stateRoutes = L.layerGroup().addTo(map);
+  links = L.layerGroup().addTo(map);
   zoneLayer = L.layerGroup().addTo(map);
   map.on("click", () => {
     closeLayers();
@@ -1546,26 +1611,78 @@ async function loadRoute() {
   }
 }
 
-async function loadLiveFires() {
-  const center = picture.fire;
-  if (!center || center.lat == null || center.lng == null) return;
+async function postAdmin(path) {
+  const headers = {};
+  if (adminToken) headers["x-relay-admin"] = adminToken;
+  const response = await fetch(coreBase + path, { method: "POST", headers: headers });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    showBanner(body.error === "watcher_off" ? "Core has no fire watcher." : "Core did not accept that.", false);
+    return false;
+  }
+  showBanner("");
+  return true;
+}
+
+async function toggleFire() {
+  if (fireBusy) return;
+  fireBusy = true;
+  const on = document.getElementById("fire-toggle").getAttribute("aria-pressed") === "true";
+  const ok = await postAdmin(on ? "/admin/clear-fire" : "/admin/alert");
+  fireBusy = false;
+  if (ok) await tick();
+}
+
+async function resetDemo() {
+  if (fireBusy) return;
+  fireBusy = true;
+  const ok = await postAdmin("/admin/reset");
+  fireBusy = false;
+  if (ok) await tick();
+}
+
+async function loadFirmsPanel() {
+  const center = picture.center;
+  const countEl = document.getElementById("firms-count");
+  const nearEl = document.getElementById("firms-nearest");
+  if (!center || center.lat == null || center.lng == null) {
+    countEl.textContent = "No venue yet";
+    nearEl.textContent = "";
+    return;
+  }
   try {
     const rows = await fetch(
-      "/hazards?lat=" + encodeURIComponent(center.lat)
+      "/firms?lat=" + encodeURIComponent(center.lat)
         + "&lng=" + encodeURIComponent(center.lng)
         + "&radius_km=50",
       { cache: "no-store" }
     ).then(readJson);
-    liveFires = Array.isArray(rows) ? firmsFires(rows) : [];
+    const fires = Array.isArray(rows) ? rows.filter((row) => row && row.lat != null && row.lng != null) : [];
+    if (!fires.length) {
+      countEl.textContent = "No detections";
+      nearEl.textContent = "";
+      return;
+    }
+    let nearest = fires[0];
+    let best = haversine(center.lat, center.lng, nearest.lat, nearest.lng);
+    fires.forEach((fire) => {
+      const distance = haversine(center.lat, center.lng, fire.lat, fire.lng);
+      if (distance < best) {
+        best = distance;
+        nearest = fire;
+      }
+    });
+    countEl.textContent = fires.length + (fires.length === 1 ? " detection" : " detections");
+    nearEl.textContent = "Nearest " + best.toFixed(1) + " km from Harvard Yard";
   } catch (err) {
-    return;
+    countEl.textContent = "NASA did not answer";
+    nearEl.textContent = "";
   }
 }
 
 async function tick() {
   loadForecast();
-  loadRoute();
-  await loadLiveFires();
+  loadFirmsPanel();
   try {
     const response = await fetch(stateUrl, { cache: "no-store" });
     render(await readJson(response));
@@ -1613,12 +1730,8 @@ async function boot() {
     try {
       await fetchPicture();
       paintWind();
-      await loadLiveFires();
-      if (lastState) {
-        syncHazards(drawnHazards(lastState));
-        syncZones(firmsFires(liveFires).filter(hazardInWindow));
-      }
-      refreshInspector();
+      await loadFirmsPanel();
+      if (lastState) refreshInspector();
     } catch (err) {
       paintWind();
     }
