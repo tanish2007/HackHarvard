@@ -8,8 +8,9 @@
 import { randomUUID } from "node:crypto";
 
 import { isDistress, parseCommand } from "./commands.js";
-import type { CoreResponse, RelayEvent } from "./contracts.js";
+import type { CoreResponse, Location, RelayEvent } from "./contracts.js";
 import { ACKNOWLEDGED, SOS_RECEIVED, handleText } from "./handler.js";
+import { parseCoordinates } from "./location.js";
 import { normalizePhone, type PeopleDirectory } from "./people.js";
 import type { Registry } from "./registry.js";
 
@@ -37,11 +38,13 @@ export interface RelayDeps {
  *     deps: The phone lookup and clock.
  *     phone: The sender's phone number in E.164 format.
  *     text: The message text.
+ *     location: Where the sender said they are, if they did.
  *
  * Returns:
- *     RelayEvent: The event, with the sender's scenario location if they have one.
+ *     RelayEvent: The event. The location is the one the sender shared, else
+ *         their scenario location, else null.
  */
-function buildEvent(deps: RelayDeps, phone: string, text: string): RelayEvent {
+function buildEvent(deps: RelayDeps, phone: string, text: string, location: Location | null = null): RelayEvent {
   const who = deps.directory.resolve(phone);
   return {
     event_id: `evt_${randomUUID()}`,
@@ -49,7 +52,7 @@ function buildEvent(deps: RelayDeps, phone: string, text: string): RelayEvent {
     person_id: who.person_id,
     from: phone,
     text,
-    location: who.location,
+    location: location ?? who.location,
     media_url: null,
     timestamp: (deps.now?.() ?? new Date()).toISOString(),
   };
@@ -65,27 +68,36 @@ function buildEvent(deps: RelayDeps, phone: string, text: string): RelayEvent {
  * Args:
  *     deps: The registry, phone lookup and Core client.
  *     phone: The sender's phone number in E.164 format.
- *     text: The message text.
+ *     text: The message text. May be empty for a shared location.
  *     send: Sends one text back to the sender.
+ *     shared: A location the sender shared, if the message carried one. A
+ *         location found inside the text itself is used too.
  */
 export async function processText(
   deps: RelayDeps,
   phone: string,
   text: string,
   send: (reply: string) => Promise<void>,
+  shared?: { location?: Location | null },
 ): Promise<void> {
   const log = deps.log ?? ((m: string) => console.warn(m));
+  // Where they say they are: a shared pin, or coordinates and Maps links typed in the text.
+  const location = shared?.location ?? parseCoordinates(text);
   const reply = handleText(deps.registry, phone, text);
+  let replied = false;
   if (reply !== null) {
     await send(reply);
     // Core must hear about STOP too: it takes the person off the map and ends
     // their check-in calls. It sends no reply, so its answer is ignored.
     if (parseCommand(text) === "stop") await deps.postEvent(buildEvent(deps, phone, text));
-    return;
+    // A location shared with a first message still tells Core where they are,
+    // so a new person lands on the map. Anyone signed out stays out.
+    if (!location || deps.registry.status(phone) !== "opted_in") return;
+    replied = true;
   }
 
   const who = deps.directory.resolve(phone);
-  const event = buildEvent(deps, phone, text);
+  const event = buildEvent(deps, phone, text, location);
 
   // Start the Core call first. Core answers a call for help with its own SOS
   // reply, so ours is only a stopgap: it goes out only if Core is still silent
@@ -115,7 +127,7 @@ export async function processText(
   }
 
   // Nobody is left without a reply, even if Core is down or has nothing to say.
-  if (sent === 0 && !acknowledged) await send(distress ? SOS_RECEIVED : ACKNOWLEDGED);
+  if (sent === 0 && !acknowledged && !replied) await send(distress ? SOS_RECEIVED : ACKNOWLEDGED);
 }
 
 /**

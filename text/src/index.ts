@@ -4,6 +4,8 @@ import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 import { createActionsServer } from "./actionsServer.js";
 import { postEvent } from "./coreClient.js";
+import { LOCATION_HINT } from "./handler.js";
+import { interpretContent, type IncomingContent } from "./incoming.js";
 import { loadDirectory, normalizePhone } from "./people.js";
 import { Registry } from "./registry.js";
 import { processText, type RelayDeps } from "./relay.js";
@@ -48,12 +50,24 @@ createActionsServer({
 for await (const [space, message] of app.messages) {
   const phone = normalizePhone(message.sender?.id ?? "");
   console.log("incoming", message.platform, phone, message.content.type);
-  if (message.content.type !== "text" || !phone) continue;
+  if (!phone) continue;
 
   try {
-    await processText(deps, phone, message.content.text, async (reply) => {
-      await space.send(reply);
-    });
+    const incoming = await interpretContent(message.content as unknown as IncomingContent);
+    if (incoming.kind === "ignore") continue;
+    if (incoming.kind === "unreadable_location") {
+      await space.send(LOCATION_HINT);
+      continue;
+    }
+    await processText(
+      deps,
+      phone,
+      incoming.text,
+      async (reply) => {
+        await space.send(reply);
+      },
+      { location: incoming.location },
+    );
   } catch (err) {
     // One bad message must not stop the bot from reading the next one.
     console.error(`[text] failed to handle a message from ${phone}:`, err);
